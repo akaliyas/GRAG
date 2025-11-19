@@ -232,5 +232,5 @@ MIT License
 
 ## 联系方式
 
-项目负责人：董志超
+项目负责人：https://github.com/akaliyas
 
