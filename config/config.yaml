@@ -1,0 +1,146 @@
+# 系统配置文件
+# 敏感信息通过环境变量提供
+
+# 数据库配置
+database:
+  postgresql:
+    host: ${POSTGRES_HOST:localhost}
+    port: ${POSTGRES_PORT:5432}
+    database: ${POSTGRES_DB:grag_db}
+    user: ${POSTGRES_USER:grag_user}
+    password: ${POSTGRES_PASSWORD}  # 从环境变量读取
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30
+
+# LightRAG 配置
+lightrag:
+  llm_model: ${LLM_MODEL:deepseek}  # deepseek 或 local
+  embedding_model: ${EMBEDDING_MODEL:text-embedding-3-small}
+  storage_type: postgresql  # postgresql 或 neo4j
+  # 实体/关系抽取的 prompt（TODO: 需要根据实际需求调整）
+  entity_extraction_prompt: |
+    你是一个技术文档实体抽取专家。请从以下文本中提取技术文档相关的实体。
+    
+    需要提取的实体类型包括：
+    1. 框架（Framework）：如 React、Vue、Django、FastAPI 等
+    2. 库（Library）：如 numpy、pandas、axios 等
+    3. API（API）：如 OpenAI API、REST API 端点等
+    4. 概念（Concept）：如异步编程、微服务、GraphQL 等
+    5. 工具（Tool）：如 Docker、Kubernetes、Git 等
+    6. 语言（Language）：如 Python、JavaScript、TypeScript 等
+    7. 方法/函数（Method/Function）：如特定的函数名、方法名等
+    
+    请以 JSON 格式返回，格式如下：
+    {{
+      "entities": [
+        {{"name": "实体名称", "type": "实体类型", "description": "简要描述"}},
+        ...
+      ]
+    }}
+    
+    文本内容：
+    {text}
+    
+    # TODO: 根据实际 LightRAG 的 prompt 格式要求调整上述 prompt
+  relation_extraction_prompt: |
+    你是一个技术文档关系抽取专家。请从以下文本中提取实体之间的关系。
+    
+    需要提取的关系类型包括：
+    1. 依赖（depends_on）：一个实体依赖另一个实体
+    2. 导入（imports）：一个实体导入另一个实体
+    3. 使用（uses）：一个实体使用另一个实体
+    4. 实现（implements）：一个实体实现另一个实体
+    5. 扩展（extends）：一个实体扩展另一个实体
+    6. 包含（contains）：一个实体包含另一个实体
+    7. 相关（related_to）：两个实体相关但关系不明确
+    
+    请以 JSON 格式返回，格式如下：
+    {{
+      "relations": [
+        {{"source": "源实体", "target": "目标实体", "type": "关系类型", "description": "关系描述"}},
+        ...
+      ]
+    }}
+    
+    文本内容：
+    {text}
+    
+    # TODO: 根据实际 LightRAG 的 prompt 格式要求调整上述 prompt
+
+# 模型配置
+models:
+  deepseek:
+    api_key: ${DEEPSEEK_API_KEY}
+    base_url: https://api.deepseek.com
+    model_name: deepseek-chat
+    temperature: 0.7
+    max_tokens: 2000
+  
+  local:
+    base_url: ${LOCAL_MODEL_URL:http://localhost:11434}  # Ollama 默认地址
+    model_name: ${LOCAL_MODEL_NAME:qwen2.5:7b}
+    temperature: 0.7
+    max_tokens: 2000
+    timeout: 60
+
+# 模型切换策略
+model_switch:
+  priority: local  # 优先使用本地模型
+  fallback_to_api: true  # 本地模型失败时回退到 API
+  health_check_interval: 300  # 健康检查间隔（秒）
+
+# API 配置
+api:
+  host: 0.0.0.0
+  port: 8000
+  debug: true
+  title: GRAG 技术文档智能问答系统
+  version: 1.0.0
+  # 认证配置
+  auth:
+    enabled: true
+    username: ${API_USERNAME:admin}
+    password: ${API_PASSWORD}  # 从环境变量读取
+
+# 前端配置
+frontend:
+  port: 8501
+  host: 0.0.0.0
+
+# 爬虫配置
+crawler:
+  delay: 2  # 请求间隔（秒）
+  respect_robots_txt: true
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+  timeout: 30
+  max_retries: 3
+
+# 缓存配置
+cache:
+  enabled: true
+  # LRU 清理策略
+  lru:
+    max_size: 10000  # 最大缓存条目数
+    cleanup_interval: 3600  # 定时清理间隔（秒）
+    cleanup_batch_size: 100  # 每次清理的条目数
+  # 质量评分阈值
+  quality:
+    low_threshold: 0.3  # 低于此分数优先清理
+    high_threshold: 0.7  # 高于此分数优先保留
+
+# 日志配置
+logging:
+  level: DEBUG
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: logs/grag.log
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# 性能监控
+monitoring:
+  enabled: true
+  metrics_file: logs/metrics.json
+  track_api_calls: true
+  track_response_time: true
+

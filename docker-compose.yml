@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: grag_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-grag_db}
+      POSTGRES_USER: ${POSTGRES_USER:-grag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grag_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grag_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - grag_network
+
+  # FastAPI 后端服务
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grag_api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-grag_db}
+      POSTGRES_USER: ${POSTGRES_USER:-grag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grag_password}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      API_USERNAME: ${API_USERNAME:-admin}
+      API_PASSWORD: ${API_PASSWORD}
+      LLM_MODEL: ${LLM_MODEL:-deepseek}
+      LOCAL_MODEL_URL: ${LOCAL_MODEL_URL:-http://localhost:11434}
+      LOCAL_MODEL_NAME: ${LOCAL_MODEL_NAME:-qwen2.5:7b}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+    networks:
+      - grag_network
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+  # Streamlit 前端服务
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: grag_frontend
+    environment:
+      API_BASE_URL: http://api:8000
+      API_USERNAME: ${API_USERNAME:-admin}
+      API_PASSWORD: ${API_PASSWORD}
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app/frontend
+      - ./config:/app/config
+    networks:
+      - grag_network
+    command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+
+volumes:
+  postgres_data:
+
+networks:
+  grag_network:
+    driver: bridge
+
