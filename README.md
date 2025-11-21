@@ -29,7 +29,7 @@ Agent层 (LangGraph)
     ↓
 数据处理层 (LightRAG)
     ↓
-数据采集层 (Scrapy + Playwright)
+数据采集层 (SaaS 服务: Firecrawl/Jina Reader)
 ```
 
 ## 技术栈
@@ -40,7 +40,7 @@ Agent层 (LangGraph)
 - **知识图谱**：LightRAG
 - **数据库**：PostgreSQL
 - **模型**：DeepSeek API / Ollama / vLLM
-- **爬虫**：Playwright + Scrapy
+- **数据采集**：Firecrawl / Jina Reader API（SaaS 服务）
 - **部署**：Docker Compose
 
 ## 快速开始
@@ -86,8 +86,11 @@ docker-compose down
 # 安装依赖
 pip install -r requirements.txt
 
-# 安装 Playwright 浏览器
-playwright install chromium
+# 配置 SaaS 爬虫服务（推荐）
+# 方式1：使用 Firecrawl（需要 API key）
+# 设置环境变量: export FIRECRAWL_API_KEY="your-api-key"
+# 方式2：使用 Jina Reader（无需 API key，但有速率限制）
+# 直接使用即可，无需配置
 
 # 启动 PostgreSQL（如果本地没有）
 docker run -d \
@@ -186,19 +189,19 @@ curl -X GET "http://localhost:8000/api/v1/stats" \
 ## 开发计划
 
 ### Phase 1：基础搭建（Week 1-2）
-- [x] 环境配置（Docker Compose）
-- [x] 数据采集模块开发
-- [x] LightRAG 集成和测试
+- [ ] 环境配置（Docker Compose）
+- [ ] 数据采集模块开发
+- [ ] LightRAG 集成和测试
 
 ### Phase 2：核心功能（Week 2-3）
-- [x] 知识图谱构建
-- [x] 双层检索实现
-- [x] API 服务开发
+- [ ] 知识图谱构建
+- [ ] 双层检索实现
+- [ ] API 服务开发
 
 ### Phase 3：应用开发（Week 3-4）
-- [x] 前端界面开发
-- [x] 用户反馈功能
-- [x] 系统集成测试
+- [ ] 前端界面开发
+- [ ] 用户反馈功能
+- [ ] 系统集成测试
 
 ### Phase 4：优化完善（Week 4）
 - [ ] 性能优化
@@ -218,13 +221,39 @@ curl -X GET "http://localhost:8000/api/v1/stats" \
 
 ## 技术指标
 
-- **检索准确率**：Comprehensiveness 49.6-54.8%，Diversity 59.2-77.2%
 - **响应时间**：平均响应时间 < 2秒
 - **成本控制**：API 调用成本 < 2.2元（200-400页文档）
 
 ## 许可证
 
-MIT License
+### 项目许可证
+
+本项目采用 **MIT License** 开源许可证。
+
+### 依赖项目许可证
+
+本项目使用了以下开源项目，它们的许可证与 MIT License 完全兼容：
+
+| 依赖项目 | 许可证 | 兼容性 |
+|---------|--------|--------|
+| [LightRAG](https://github.com/HKUDS/LightRAG) | MIT License | ✅ 完全兼容 |
+| [FastAPI](https://github.com/tiangolo/fastapi) | MIT License | ✅ 完全兼容 |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | MIT License | ✅ 完全兼容 |
+| [LangChain](https://github.com/langchain-ai/langchain) | MIT License | ✅ 完全兼容 |
+| [Playwright](https://github.com/microsoft/playwright) | Apache 2.0 | ✅ 兼容 |
+| [Streamlit](https://github.com/streamlit/streamlit) | Apache 2.0 | ✅ 兼容 |
+| [SQLAlchemy](https://github.com/sqlalchemy/sqlalchemy) | MIT License | ✅ 完全兼容 |
+| [Scrapy](https://github.com/scrapy/scrapy) | BSD License | ✅ 兼容 |
+| [PostgreSQL](https://www.postgresql.org/) | PostgreSQL License | ✅ 兼容 |
+
+### 许可证兼容性说明
+
+MIT License 是兼容性最好的开源许可证之一，可以：
+- ✅ 与 MIT、Apache 2.0、BSD 等宽松许可证兼容
+- ✅ 允许商业使用、修改和分发
+- ✅ 只需保留原始版权声明
+
+所有依赖项目的许可证都与 MIT License 兼容，可以安全地在本项目中使用。
 
 ## 贡献
 
@@ -232,5 +261,5 @@ MIT License
 
 ## 联系方式
 
-项目负责人：董志超
+项目负责人：akaliyas
 

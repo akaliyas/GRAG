@@ -15,30 +15,59 @@ except ImportError:
     Browser = None
     Page = None
 
-from config.config_manager import get_config
-
 logger = logging.getLogger(__name__)
 
 
 class DocumentScraper:
     """文档爬虫"""
     
-    def __init__(self):
-        """初始化爬虫"""
+    def __init__(self, delay: float = 5, respect_robots_txt: bool = True, 
+                 user_agent: Optional[str] = None, timeout: int = 30, 
+                 max_retries: int = 3, use_config: bool = True):
+        """
+        初始化爬虫
+        
+        Args:
+            delay: 请求间隔（秒）
+            respect_robots_txt: 是否遵守 robots.txt
+            user_agent: 用户代理字符串
+            timeout: 超时时间（秒）
+            max_retries: 最大重试次数
+            use_config: 是否使用配置文件（如果为 False，则使用传入的参数）
+        """
         if sync_playwright is None:
             raise ImportError("需要安装 playwright 库: pip install playwright")
         
-        config = get_config()
-        crawler_config = config.get("crawler", {})
+        if use_config:
+            try:
+                from config.config_manager import get_config
+                config = get_config()
+                crawler_config = config.get("crawler", {})
+                
+                self.delay = crawler_config.get("delay", delay)
+                self.respect_robots_txt = crawler_config.get("respect_robots_txt", respect_robots_txt)
+                self.user_agent = crawler_config.get("user_agent", user_agent)
+                self.timeout = crawler_config.get("timeout", timeout)
+                self.max_retries = crawler_config.get("max_retries", max_retries)
+            except Exception as e:
+                logger.warning(f"无法加载配置文件，使用默认参数: {e}")
+                # 如果配置加载失败，使用传入的参数
+                self.delay = delay
+                self.respect_robots_txt = respect_robots_txt
+                self.user_agent = user_agent
+                self.timeout = timeout
+                self.max_retries = max_retries
+        else:
+            # 直接使用传入的参数
+            self.delay = delay
+            self.respect_robots_txt = respect_robots_txt
+            self.user_agent = user_agent
+            self.timeout = timeout
+            self.max_retries = max_retries
         
-        self.delay = crawler_config.get("delay", 1.5)
-        self.respect_robots_txt = crawler_config.get("respect_robots_txt", True)
-        self.user_agent = crawler_config.get(
-            "user_agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
-        self.timeout = crawler_config.get("timeout", 30)
-        self.max_retries = crawler_config.get("max_retries", 3)
+        # 设置默认 user_agent
+        if not self.user_agent:
+            self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         
         self.playwright = None
         self.browser: Optional[Browser] = None
@@ -112,11 +141,21 @@ class DocumentScraper:
             
         Returns:
             包含 url, title, content, html 的字典，失败返回 None
+            
+        Raises:
+            ValueError: 如果 robots.txt 明确禁止爬取且 respect_robots_txt=True
         """
         # 检查 robots.txt
         if not self._check_robots_txt(url):
-            logger.warning(f"robots.txt 禁止爬取: {url}")
-            return None
+            if self.respect_robots_txt:
+                # 如果明确设置了遵守 robots.txt，且被禁止，应该抛出异常
+                error_msg = f"robots.txt 明确禁止爬取此 URL: {url}。请设置 respect_robots_txt=False 或遵守网站规则。"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            else:
+                # 如果设置了不遵守 robots.txt，记录警告但继续
+                logger.warning(f"robots.txt 禁止爬取，但已设置不遵守: {url}")
+                # 继续执行
         
         if not self.browser:
             self.start()
