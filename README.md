@@ -86,11 +86,12 @@ docker-compose down
 # 安装依赖
 pip install -r requirements.txt
 
-# 配置 SaaS 爬虫服务（推荐）
-# 方式1：使用 Firecrawl（需要 API key）
-# 设置环境变量: export FIRECRAWL_API_KEY="your-api-key"
-# 方式2：使用 Jina Reader（无需 API key，但有速率限制）
-# 直接使用即可，无需配置
+# 使用 （可选，无需手动激活虚拟环境）
+# 方式1：创建隔离环境
+#   uv venv
+#   uv pip sync requirements.txt
+# 方式2：直接运行脚本（自动解析 requirements）
+#   uv run scripts/extract_sample.py --repo <repo-url> --output samples/data.json
 
 # 启动 PostgreSQL（如果本地没有）
 docker run -d \

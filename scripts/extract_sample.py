@@ -8,10 +8,13 @@ import json
 import logging
 import sys
 import time
+import os
 from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+from tqdm import tqdm
 from github import Github
 from github.GithubException import (
     GithubException,
@@ -20,6 +23,8 @@ from github.GithubException import (
     BadCredentialsException
 )
 
+load_dotenv()
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -77,9 +82,10 @@ class GitHubDocExtractor:
         try:
             rate_limit = self.github.get_rate_limit()
             core = rate_limit.core
+            reset_ts = core.reset.timestamp() if hasattr(core.reset, "timestamp") else int(core.reset)
             logger.info(
                 f"GitHub API 速率限制: 剩余 {core.remaining}/{core.limit} 请求, "
-                f"重置时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(core.reset))}"
+                f"重置时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(reset_ts))}"
             )
             
             if core.remaining < 10:
@@ -286,12 +292,41 @@ class GitHubDocExtractor:
             "files": []
         }
         
-        # 获取所有文件
-        all_files = self.get_repo_contents(owner, repo, path, file_extensions)
+        # 如果指定了 include_paths，优先使用它们作为起始路径
+        # 否则使用 URL 中解析的 path，如果都没有则从根目录开始
+        search_paths = []
+        if include_paths:
+            # 使用 include_paths 作为起始路径
+            search_paths = include_paths
+            logger.info(f"从指定路径开始搜索: {search_paths}")
+        elif path:
+            # 使用 URL 中的路径
+            search_paths = [path]
+        else:
+            # 从根目录开始
+            search_paths = [""]
+        
+        # 从多个路径获取文件（如果指定了多个 include_paths）
+        all_files = []
+        for search_path in search_paths:
+            files = self.get_repo_contents(owner, repo, search_path, file_extensions)
+            all_files.extend(files)
+        
         logger.info(f"找到 {len(all_files)} 个文档文件")
         
         # 过滤文件
         filtered_files = []
+        
+        # 调试：显示过滤条件
+        if exclude_paths:
+            logger.info(f"排除路径过滤条件: {exclude_paths}")
+        
+        # 调试：显示前几个文件路径示例
+        if all_files:
+            logger.info(f"前 5 个文件路径示例:")
+            for file_info in all_files[:5]:
+                logger.info(f"  - {file_info.get('path', '')}")
+        
         for file_info in all_files:
             file_path = file_info.get('path', '')
             
@@ -299,11 +334,9 @@ class GitHubDocExtractor:
             if any(file_path.startswith(exclude) for exclude in exclude_paths):
                 continue
             
-            # 检查包含路径
-            if include_paths and not any(
-                file_path.startswith(include) for include in include_paths
-            ):
-                continue
+            # 注意：include_paths 已经作为起始路径使用，不需要再次过滤
+            # 但如果用户同时指定了 URL 路径和 include_paths，这里可以进一步细化过滤
+            # 目前简化处理：如果 include_paths 已使用，就不再过滤
             
             filtered_files.append(file_info)
             
@@ -312,25 +345,31 @@ class GitHubDocExtractor:
         
         logger.info(f"过滤后剩余 {len(filtered_files)} 个文件")
         
-        # 提取文件内容
-        for i, file_info in enumerate(filtered_files, 1):
-            file_path = file_info['path']
-            logger.info(f"处理文件 {i}/{len(filtered_files)}: {file_path}")
-            
-            content = self.get_file_content(owner, repo, file_path)
-            
-            if content:
-                results["files"].append({
-                    "path": file_path,
-                    "name": file_info['name'],
-                    "url": file_info.get('html_url', ''),
-                    "size": file_info.get('size', 0),
-                    "content": content,
-                    "content_length": len(content)
-                })
-            
-            # PyGithub 会自动处理速率限制，但可以添加小延迟避免过于频繁
-            time.sleep(0.1)
+        # 提取文件内容（使用进度条）
+        with tqdm(total=len(filtered_files), desc="获取文件内容", unit="文件", ncols=100) as pbar:
+            for file_info in filtered_files:
+                file_path = file_info['path']
+                # 显示当前处理的文件名（截断过长的路径）
+                display_name = Path(file_path).name
+                if len(display_name) > 40:
+                    display_name = display_name[:37] + "..."
+                pbar.set_description(f"处理: {display_name}")
+                
+                content = self.get_file_content(owner, repo, file_path)
+                
+                if content:
+                    results["files"].append({
+                        "path": file_path,
+                        "name": file_info['name'],
+                        "url": file_info.get('html_url', ''),
+                        "size": file_info.get('size', 0),
+                        "content": content,
+                        "content_length": len(content)
+                    })
+                
+                pbar.update(1)
+                # PyGithub 会自动处理速率限制，但可以添加小延迟避免过于频繁
+                time.sleep(0.1)
         
         # 保存结果
         logger.info(f"正在保存结果到: {output_file}")
@@ -401,8 +440,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--github-token",
-        default=None,
-        help="GitHub Personal Access Token（可选，用于提高速率限制）"
+        default=GITHUB_TOKEN,
+        help="GitHub Personal Access Token（默认读取环境变量 GITHUB_TOKEN）"
     )
     parser.add_argument(
         "--include",
