@@ -40,7 +40,7 @@ def setup_simple_logger():
     
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
@@ -65,16 +65,23 @@ class GitHubDocExtractor:
             github_token: GitHub Personal Access Token（可选，用于提高速率限制）
         """
         try:
+            # PyGithub 会自动处理重试，默认会重试多次
             self.github = Github(github_token) if github_token else Github()
             self.github_token = github_token
             
-            # 检查速率限制状态
+            # 检查速率限制状态（这里可能会遇到网络问题，PyGithub 会自动重试）
+            logger.info("正在连接 GitHub API...")
             self._check_rate_limit_status()
         except BadCredentialsException:
             logger.error("GitHub 认证失败，请检查 token 是否有效")
             raise
         except Exception as e:
             logger.error(f"初始化 GitHub 客户端失败: {e}")
+            logger.error("如果遇到网络连接问题，请检查：")
+            logger.error("1. 网络连接是否正常（可以访问 https://api.github.com）")
+            logger.error("2. 是否使用了代理（可能需要配置环境变量）")
+            logger.error("3. 防火墙是否阻止了连接")
+            logger.error("4. 等待一段时间后重试（PyGithub 会自动重试）")
             raise
     
     def _check_rate_limit_status(self):
@@ -145,6 +152,8 @@ class GitHubDocExtractor:
             try:
                 if path:
                     contents = repo_obj.get_contents(path)
+                    count = len(contents) if isinstance(contents, list) else 1
+                    logger.info(f"访问路径: {path}, 获取到 {count} 个项目")
                 else:
                     contents = repo_obj.get_contents("")
             except UnknownObjectException:
@@ -154,6 +163,11 @@ class GitHubDocExtractor:
             # 如果是单个文件，转换为列表
             if not isinstance(contents, list):
                 contents = [contents]
+            
+            # 调试：显示路径下的内容类型（前10个）
+            if contents:
+                content_preview = [f"{c.type}:{c.name}" for c in contents[:10]]
+                logger.info(f"路径 {path} 下的内容: {content_preview}")
             
             files = []
             
@@ -172,10 +186,13 @@ class GitHubDocExtractor:
                         })
                 elif content.type == "dir":
                     # 递归获取子目录内容
+                    logger.info(f"递归访问目录: {content.path}")
                     sub_files = self.get_repo_contents(
                         owner, repo, content.path, file_extensions
                     )
                     files.extend(sub_files)
+                    if sub_files:
+                        logger.info(f"从目录 {content.path} 获取到 {len(sub_files)} 个文件")
             
             return files
             

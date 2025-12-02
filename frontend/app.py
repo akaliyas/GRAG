@@ -107,7 +107,7 @@ def switch_model(model_type: str) -> bool:
     切换模型
     
     Args:
-        model_type: 模型类型（"local" 或 "deepseek"）
+        model_type: 模型类型（"api" 或 "local"，local 暂时禁用）
         
     Returns:
         是否切换成功
@@ -138,10 +138,19 @@ with st.sidebar:
     
     # 模型切换
     st.subheader("模型选择")
+    # ========================================================================
+    # Ollama 本地模型支持已弃用
+    # ========================================================================
+    # model_type = st.selectbox(
+    #     "当前模型",
+    #     ["local", "deepseek"],
+    #     index=0 if st.session_state.current_model == "local" else 1
+    # )
+    
     model_type = st.selectbox(
         "当前模型",
-        ["local", "deepseek"],
-        index=0 if st.session_state.current_model == "local" else 1
+        ["api"],  # local 暂时禁用
+        index=0
     )
     
     if st.button("切换模型"):

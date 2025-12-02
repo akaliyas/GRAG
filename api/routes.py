@@ -83,7 +83,7 @@ class FeedbackResponse(BaseModel):
 
 class ModelSwitchRequest(BaseModel):
     """模型切换请求"""
-    model_type: str  # "local" 或 "deepseek"
+    model_type: str  # "api" 或 "local"（local 暂时禁用）
 
 
 class ModelSwitchResponse(BaseModel):

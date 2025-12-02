@@ -19,6 +19,7 @@ except ImportError:
 from models.model_manager import ModelManager
 from knowledge.lightrag_wrapper import LightRAGWrapper
 from utils.monitoring import track_performance
+from agent.tools.github_ingestor import GitHubIngestor
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 class IntentType(str, Enum):
     """意图类型"""
     QUERY = "query"  # 直接查询
-    CRAWL = "crawl"  # 需要爬取数据
+    GITHUB_INGEST = "github_ingest"  # 需要从 GitHub 获取数据
     PREPROCESS = "preprocess"  # 需要数据预处理
     UNKNOWN = "unknown"  # 未知意图
 
@@ -37,9 +38,9 @@ if TypedDict:
         messages: Annotated[List[Dict], "消息列表"]
         intent: str  # 意图类型
         query: str  # 查询文本
-        need_crawl: bool  # 是否需要爬取
+        need_github_ingest: bool  # 是否需要从 GitHub 获取数据
         need_preprocess: bool  # 是否需要预处理
-        crawl_urls: List[str]  # 需要爬取的 URL 列表
+        github_repo_urls: List[str]  # GitHub 仓库 URL 列表
         documents: List[str]  # 文档列表
         context_ids: List[str]  # 检索到的上下文 ID
         answer: str  # 生成的答案
@@ -69,11 +70,14 @@ class GRAGAgent:
         self.model_manager = model_manager
         self.lightrag = lightrag_wrapper
         
+        # 初始化 GitHub 提取工具（完全去爬虫化，仅使用 GitHub API）
+        self.github_ingestor = GitHubIngestor()
+        
         # 构建 Agent 图
         self.graph = self._build_graph()
         self.app = self.graph.compile()
         
-        logger.info("GRAG Agent 已初始化")
+        logger.info("GRAG Agent 已初始化（Zero-Crawler 模式）")
     
     def _build_graph(self) -> StateGraph:
         """构建 Agent 图"""
@@ -81,7 +85,7 @@ class GRAGAgent:
         
         # 添加节点
         graph.add_node("intent_recognition", self._intent_recognition)
-        graph.add_node("crawl_tool", self._crawl_tool)
+        graph.add_node("github_ingest_tool", self._github_ingest_tool)
         graph.add_node("preprocess_tool", self._preprocess_tool)
         graph.add_node("retrieve", self._retrieve)
         graph.add_node("generate_answer", self._generate_answer)
@@ -94,14 +98,14 @@ class GRAGAgent:
             "intent_recognition",
             self._route_after_intent,
             {
-                "crawl": "crawl_tool",
+                "github_ingest": "github_ingest_tool",
                 "preprocess": "preprocess_tool",
                 "retrieve": "retrieve",
                 "error": END
             }
         )
         
-        graph.add_edge("crawl_tool", "preprocess_tool")
+        graph.add_edge("github_ingest_tool", "preprocess_tool")
         graph.add_edge("preprocess_tool", "retrieve")
         graph.add_edge("retrieve", "generate_answer")
         graph.add_edge("generate_answer", END)
@@ -131,10 +135,10 @@ class GRAGAgent:
             intent_prompt = f"""
 请分析以下用户查询的意图，返回 JSON 格式：
 {{
-    "intent": "query|crawl|preprocess",
-    "need_crawl": true/false,
+    "intent": "query|github_ingest|preprocess",
+    "need_github_ingest": true/false,
     "need_preprocess": true/false,
-    "crawl_urls": ["url1", "url2"]  // 如果需要爬取
+    "github_repo_urls": ["https://github.com/owner/repo"]  // 如果需要从 GitHub 获取数据
 }}
 
 用户查询：{query}
@@ -153,9 +157,9 @@ class GRAGAgent:
             # 这里简化处理，实际应该使用 JSON 解析
             state["intent"] = IntentType.QUERY.value
             state["query"] = query
-            state["need_crawl"] = False
+            state["need_github_ingest"] = False
             state["need_preprocess"] = False
-            state["crawl_urls"] = []
+            state["github_repo_urls"] = []
             
             logger.info(f"意图识别完成: {state['intent']}")
         except Exception as e:
@@ -178,17 +182,17 @@ class GRAGAgent:
         if state.get("error"):
             return "error"
         
-        if state.get("need_crawl"):
-            return "crawl"
+        if state.get("need_github_ingest"):
+            return "github_ingest"
         elif state.get("need_preprocess"):
             return "preprocess"
         else:
             return "retrieve"
     
-    @track_performance("crawl_tool")
-    def _crawl_tool(self, state: AgentState) -> AgentState:
+    @track_performance("github_ingest_tool")
+    def _github_ingest_tool(self, state: AgentState) -> AgentState:
         """
-        爬虫工具节点
+        GitHub 数据提取工具节点（完全去爬虫化，仅使用 GitHub API）
         
         Args:
             state: 当前状态
@@ -197,15 +201,29 @@ class GRAGAgent:
             更新后的状态
         """
         try:
-            crawl_urls = state.get("crawl_urls", [])
-            # TODO: 调用爬虫模块
-            # from crawler.crawler import crawl_documents
-            # documents = crawl_documents(crawl_urls)
-            # state["documents"] = documents
+            repo_urls = state.get("github_repo_urls", [])
+            if not repo_urls:
+                logger.warning("GitHub 仓库 URL 列表为空")
+                state["documents"] = []
+                return state
             
-            logger.info(f"爬取完成: {len(crawl_urls)} 个 URL")
+            all_documents = []
+            for repo_url in repo_urls:
+                try:
+                    # 使用 GitHubIngestor 提取文档
+                    documents = self.github_ingestor.download_and_clean(repo_url)
+                    # 提取文档内容
+                    doc_contents = [doc['content'] for doc in documents]
+                    all_documents.extend(doc_contents)
+                    logger.info(f"从 {repo_url} 提取了 {len(doc_contents)} 个文档")
+                except Exception as e:
+                    logger.error(f"从 {repo_url} 提取文档失败: {e}")
+                    continue
+            
+            state["documents"] = all_documents
+            logger.info(f"GitHub 数据提取完成: 共 {len(all_documents)} 个文档")
         except Exception as e:
-            logger.error(f"爬取失败: {e}")
+            logger.error(f"GitHub 数据提取失败: {e}")
             state["error"] = str(e)
         
         return state
@@ -323,9 +341,9 @@ class GRAGAgent:
             "messages": [{"role": "user", "content": query}],
             "query": query,
             "intent": "",
-            "need_crawl": False,
+            "need_github_ingest": False,
             "need_preprocess": False,
-            "crawl_urls": [],
+            "github_repo_urls": [],
             "documents": [],
             "context_ids": [],
             "answer": "",

@@ -48,19 +48,34 @@ class ConfigManager:
             return {k: self._resolve_env_vars(v) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [self._resolve_env_vars(item) for item in obj]
-        elif isinstance(obj, str) and obj.startswith("${") and obj.endswith("}"):
-            # 解析 ${VAR_NAME:default_value} 格式
-            var_expr = obj[2:-1]
-            if ":" in var_expr:
-                var_name, default_value = var_expr.split(":", 1)
-                return os.getenv(var_name.strip(), default_value.strip())
-            else:
-                var_value = os.getenv(var_expr.strip())
-                if var_value is None:
-                    raise ValueError(f"环境变量 {var_expr} 未设置且无默认值")
-                return var_value
-        else:
-            return obj
+        elif isinstance(obj, str):
+            # 检查是否是环境变量格式
+            if obj.startswith("${") and obj.endswith("}"):
+                # 解析 ${VAR_NAME:default_value} 格式
+                var_expr = obj[2:-1]
+                if ":" in var_expr:
+                    var_name, default_value = var_expr.split(":", 1)
+                    return os.getenv(var_name.strip(), default_value.strip())
+                else:
+                    var_value = os.getenv(var_expr.strip())
+                    if var_value is None:
+                        raise ValueError(f"环境变量 {var_expr} 未设置且无默认值")
+                    return var_value
+            # 如果字符串包含环境变量格式（可能被其他内容包围），尝试提取
+            elif "${" in obj and "}" in obj:
+                # 尝试提取并替换环境变量
+                import re
+                pattern = r'\$\{([^}]+)\}'
+                def replace_env(match):
+                    var_expr = match.group(1)
+                    if ":" in var_expr:
+                        var_name, default_value = var_expr.split(":", 1)
+                        return os.getenv(var_name.strip(), default_value.strip())
+                    else:
+                        var_value = os.getenv(var_expr.strip())
+                        return var_value if var_value is not None else match.group(0)
+                return re.sub(pattern, replace_env, obj)
+        return obj
     
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -94,7 +109,7 @@ class ConfigManager:
         """获取 LightRAG 配置"""
         return self.get("lightrag", {})
     
-    def get_model_config(self, model_type: str = "deepseek") -> Dict[str, Any]:
+    def get_model_config(self, model_type: str = "api") -> Dict[str, Any]:
         """获取模型配置"""
         return self.get(f"models.{model_type}", {})
     
