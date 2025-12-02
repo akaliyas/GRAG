@@ -50,9 +50,9 @@ if _is_jupyter():
 try:
     from lightrag import LightRAG, QueryParam
     from lightrag.utils import EmbeddingFunc
-    # ========================================================================
+    # ================================================================
     # Ollama 嵌入支持已弃用
-    # ========================================================================
+    # ================================================================
     # from lightrag.llm.ollama import ollama_embed
     from lightrag.llm.openai import openai_embed
 except ImportError:
