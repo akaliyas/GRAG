@@ -67,6 +67,15 @@ Thumbs.db
 samples/
 *.json.bak
 
+# 本地缓存与生成产物（应忽略）
+.cursor/
+artifacts/
+
+# 本地/临时文档（如有）
+docs/*_draft.md
+docs/*_local.md
+docs/*-tmp.md
+
 # 配置文件（如果包含敏感信息）
 # config/config.yaml  # 如果需要忽略，取消注释
 
