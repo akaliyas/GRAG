@@ -110,6 +110,29 @@ class LightRAGWrapper:
             vector_storage = lightrag_config.get('vector_storage', 'PGVectorStorage')
             graph_storage = lightrag_config.get('graph_storage', 'PGGraphStorage')
             doc_status_storage = lightrag_config.get('doc_status_storage', 'PGDocStatusStorage')
+        elif storage_type == 'neo4j':
+            # Neo4j 图数据库配置
+            neo4j_config = config.get_neo4j_config()
+            os.environ.setdefault('NEO4J_URI', str(neo4j_config.get('uri', 'neo4j://localhost:7687')))
+            os.environ.setdefault('NEO4J_USERNAME', str(neo4j_config.get('username', 'neo4j')))
+            os.environ.setdefault('NEO4J_PASSWORD', str(neo4j_config.get('password', 'neo4j_password')))
+            os.environ.setdefault('NEO4J_DATABASE', str(neo4j_config.get('database', 'neo4j')))
+            os.environ.setdefault('NEO4J_MAX_CONNECTION_POOL_SIZE', str(neo4j_config.get('max_connection_pool_size', 100)))
+            os.environ.setdefault('NEO4J_CONNECTION_TIMEOUT', str(neo4j_config.get('connection_timeout', 30)))
+            
+            # PostgreSQL 仍然用于 KV 和 Vector 存储
+            os.environ.setdefault('POSTGRES_HOST', str(db_config.get('host', 'localhost')))
+            os.environ.setdefault('POSTGRES_PORT', str(db_config.get('port', 5432)))
+            os.environ.setdefault('POSTGRES_USER', str(db_config.get('user', '')))
+            os.environ.setdefault('POSTGRES_PASSWORD', str(db_config.get('password', '')))
+            os.environ.setdefault('POSTGRES_DATABASE', str(db_config.get('database', 'grag_db')))
+            os.environ.setdefault('POSTGRES_MAX_CONNECTIONS', str(db_config.get('pool_size', 10)))
+            
+            # 使用 Neo4j 作为图存储，PostgreSQL 作为 KV 和 Vector 存储
+            kv_storage = lightrag_config.get('kv_storage', 'PGKVStorage')
+            vector_storage = lightrag_config.get('vector_storage', 'PGVectorStorage')
+            graph_storage = lightrag_config.get('graph_storage', 'Neo4JStorage')  # 使用 Neo4j
+            doc_status_storage = lightrag_config.get('doc_status_storage', 'PGDocStatusStorage')
         else:
             # 默认使用文件存储（JsonKVStorage, NetworkXStorage, NanoVectorDBStorage）
             kv_storage = lightrag_config.get('kv_storage', 'JsonKVStorage')
@@ -129,8 +152,8 @@ class LightRAGWrapper:
             workspace=lightrag_config.get('workspace', '')
         )
         
-        # 对于 PostgreSQL 存储，需要显式初始化数据库连接
-        if storage_type == 'postgresql':
+        # 对于 PostgreSQL 或 Neo4j 存储，需要显式初始化数据库连接
+        if storage_type in ['postgresql', 'neo4j']:
             try:
                 # 在 Jupyter 环境中，使用 nest_asyncio 或新线程
                 if _is_jupyter():
@@ -170,7 +193,7 @@ class LightRAGWrapper:
         Returns:
             LLM 函数
         """
-        def llm_func(messages: List[Dict[str, str]], **kwargs) -> str:
+        async def llm_func(messages: List[Dict[str, str]], **kwargs) -> str:
             """
             LightRAG 需要的 LLM 函数格式
             
@@ -182,7 +205,15 @@ class LightRAGWrapper:
                 模型生成的文本
             """
             try:
-                response = self.model_manager.chat_completion(
+                # 兼容字符串或 List[str] 输入，统一为 messages 列表
+                if isinstance(messages, str):
+                    messages = [{"role": "user", "content": messages}]
+                elif messages and isinstance(messages, list) and isinstance(messages[0], str):
+                    messages = [{"role": "user", "content": m} for m in messages]
+
+                # 使用线程池调用同步的 chat_completion，保持接口为 async
+                response = await asyncio.to_thread(
+                    self.model_manager.chat_completion,
                     messages=messages,
                     temperature=kwargs.get('temperature', 0.7),
                     max_tokens=kwargs.get('max_tokens', 2000),
@@ -216,7 +247,18 @@ class LightRAGWrapper:
         if EmbeddingFunc is None:
             raise ImportError("需要安装 lightrag 库: pip install lightrag")
         
-        embedding_model = lightrag_config.get('embedding_model', 'BAAI/bge-m3')
+        # 解析 embedding_model（处理占位符）
+        embedding_model_raw = lightrag_config.get('embedding_model', 'BAAI/bge-m3')
+        if isinstance(embedding_model_raw, str) and embedding_model_raw.startswith("${") and embedding_model_raw.endswith("}"):
+            var_expr = embedding_model_raw[2:-1]
+            if ":" in var_expr:
+                var_name, default_value = var_expr.split(":", 1)
+                embedding_model = os.getenv(var_name.strip(), default_value.strip())
+            else:
+                embedding_model = os.getenv(var_expr.strip(), 'BAAI/bge-m3')
+        else:
+            embedding_model = embedding_model_raw if embedding_model_raw else 'BAAI/bge-m3'
+        
         embedding_provider_raw = lightrag_config.get('embedding_provider', 'siliconflow')
         
         # 如果值仍然是环境变量格式（未解析），手动解析
@@ -235,9 +277,31 @@ class LightRAGWrapper:
             if openai_embed is None:
                 raise ImportError("需要安装 lightrag 库以使用 OpenAI 兼容的嵌入功能")
             
-            # 获取 API key 和 base_url
-            api_key = lightrag_config.get('embedding_api_key') or os.getenv('EMBEDDING_API_KEY')
-            base_url = lightrag_config.get('embedding_base_url') or os.getenv('EMBEDDING_BASE_URL')
+            # 获取 API key 和 base_url（处理占位符）
+            api_key_raw = lightrag_config.get('embedding_api_key') or os.getenv('EMBEDDING_API_KEY')
+            base_url_raw = lightrag_config.get('embedding_base_url') or os.getenv('EMBEDDING_BASE_URL')
+            
+            # 解析 base_url（处理占位符）
+            if isinstance(base_url_raw, str) and base_url_raw.startswith("${") and base_url_raw.endswith("}"):
+                var_expr = base_url_raw[2:-1]
+                if ":" in var_expr:
+                    var_name, default_value = var_expr.split(":", 1)
+                    base_url = os.getenv(var_name.strip(), default_value.strip())
+                else:
+                    base_url = os.getenv(var_expr.strip())
+            else:
+                base_url = base_url_raw
+            
+            # 解析 api_key（处理占位符）
+            if isinstance(api_key_raw, str) and api_key_raw.startswith("${") and api_key_raw.endswith("}"):
+                var_expr = api_key_raw[2:-1]
+                if ":" in var_expr:
+                    var_name, default_value = var_expr.split(":", 1)
+                    api_key = os.getenv(var_name.strip(), default_value.strip())
+                else:
+                    api_key = os.getenv(var_expr.strip())
+            else:
+                api_key = api_key_raw
             
             # 如果没有配置，尝试从环境变量或默认值获取
             if not api_key:
@@ -283,8 +347,25 @@ class LightRAGWrapper:
             
             # 使用模型名称的小写形式进行匹配
             model_key = embedding_model.lower()
-            embedding_dim = embedding_dim_map.get(model_key, 1024)  # 默认 1024
+            # 优先从环境变量读取维度（如果设置了）
+            embedding_dim_env = os.getenv('EMBEDDING_DIM')
+            if embedding_dim_env:
+                try:
+                    embedding_dim = int(embedding_dim_env)
+                    logger.info(f"从环境变量 EMBEDDING_DIM 读取维度: {embedding_dim}")
+                except ValueError:
+                    logger.warning(f"环境变量 EMBEDDING_DIM 值无效: {embedding_dim_env}，使用模型映射维度")
+                    embedding_dim = embedding_dim_map.get(model_key, 1024)
+            else:
+                # 如果没有设置环境变量，使用模型映射
+                embedding_dim = embedding_dim_map.get(model_key, 1024)
+
+            # 将最终维度写回环境，保证 LightRAG 内部校验使用同一值
+            os.environ["EMBEDDING_DIM"] = str(embedding_dim)
             
+            # 选择底层嵌入调用，避免被 LightRAG 内置装饰器强制写死 1536 维
+            base_openai_embed = openai_embed.func if hasattr(openai_embed, "func") else openai_embed
+
             # 创建 OpenAI 兼容的嵌入函数
             async def embedding_func(texts: List[str]) -> np.ndarray:
                 """
@@ -297,11 +378,12 @@ class LightRAGWrapper:
                     嵌入向量 numpy 数组
                 """
                 try:
-                    return await openai_embed(
+                    return await base_openai_embed(
                         texts,
                         model=embedding_model,
                         api_key=api_key,
                         base_url=base_url,
+                        embedding_dim=embedding_dim,
                     )
                 except Exception as e:
                     logger.error(f"{embedding_provider} Embedding 调用失败: {e}")
@@ -797,20 +879,29 @@ class LightRAGWrapper:
         try:
             # TODO: 根据实际 LightRAG API 调整查询参数
             query_param = QueryParam(
-                query=query,
                 mode=mode,
                 top_k=top_k
             )
             
-            result = self.rag.query(query_param)
+            result = self.rag.query(query, query_param)
+            
+            # LightRAG.query() 返回 str 或 Iterator[str]，不是字典
+            # 需要统一处理为字符串答案
+            if result is None:
+                answer = ""
+            elif isinstance(result, str):
+                answer = result
+            else:
+                # 如果是迭代器，收集所有内容
+                answer = "".join(result) if hasattr(result, '__iter__') else str(result)
             
             # 格式化返回结果
             return {
-                'answer': result.get('answer', ''),
-                'contexts': result.get('contexts', []),
-                'entities': result.get('entities', []),
-                'relations': result.get('relations', []),
-                'context_ids': result.get('context_ids', [])
+                'answer': answer,
+                'contexts': [],
+                'entities': [],
+                'relations': [],
+                'context_ids': []
             }
         except Exception as e:
             logger.error(f"查询失败: {e}")

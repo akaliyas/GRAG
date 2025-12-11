@@ -201,8 +201,24 @@ class ModelManager:
             # 优先使用 API
             if self.api_llm:
                 if self.api_llm.is_available():
+                    # 修复: 将 DeepSeek Chat API 调用包装为 message list 格式
+                    original_chat_completion = self.api_llm.chat_completion
+
+                    def wrapped_chat_completion(messages, *args, **kwargs):
+                        """
+                        包装 DeepSeek Chat 调用，若传入字符串 prompt，则转换为标准 messages 列表
+                        """
+                        # DeepSeek Chat API 需要 messages 为列表
+                        if isinstance(messages, str):
+                            # 将字符串 prompt 包装为标准 user 消息
+                            messages = [{"role": "user", "content": messages}]
+                        return original_chat_completion(messages, *args, **kwargs)
+
+                    # 替换原有方法，仅用于当前管理器实例
+                    self.api_llm.chat_completion = wrapped_chat_completion
+
                     self._current_model = self.api_llm
-                    logger.info("✅ 已选择 API 模型（DeepSeek）")
+                    logger.info("✅ 已选择 API 模型（DeepSeek），修复消息格式兼容")
                 else:
                     self._current_model = None
                     logger.warning("⚠️ API 模型不可用（健康检查失败）")
@@ -262,6 +278,13 @@ class ModelManager:
         
         if model is None:
             raise RuntimeError("没有可用的模型")
+        
+        # 兼容传入字符串 prompt（部分上游可能直接给字符串）
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+        elif messages and isinstance(messages, list) and isinstance(messages[0], str):
+            # 兼容 List[str]
+            messages = [{"role": "user", "content": m} for m in messages]
         
         try:
             return model.chat_completion(

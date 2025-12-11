@@ -8,6 +8,18 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from functools import lru_cache
 
+# 加载 .env 文件（如果存在）
+try:
+    from dotenv import load_dotenv
+    # 获取项目根目录并加载 .env 文件
+    project_root = Path(__file__).parent.parent
+    env_path = project_root / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    # dotenv 未安装，跳过
+    pass
+
 
 class ConfigManager:
     """配置管理器"""
@@ -45,7 +57,10 @@ class ConfigManager:
         支持格式: ${VAR_NAME:default_value}
         """
         if isinstance(obj, dict):
-            return {k: self._resolve_env_vars(v) for k, v in obj.items()}
+            # 递归处理字典，但需要原地修改
+            for k, v in obj.items():
+                obj[k] = self._resolve_env_vars(v)
+            return obj
         elif isinstance(obj, list):
             return [self._resolve_env_vars(item) for item in obj]
         elif isinstance(obj, str):
@@ -55,7 +70,8 @@ class ConfigManager:
                 var_expr = obj[2:-1]
                 if ":" in var_expr:
                     var_name, default_value = var_expr.split(":", 1)
-                    return os.getenv(var_name.strip(), default_value.strip())
+                    resolved = os.getenv(var_name.strip(), default_value.strip())
+                    return resolved
                 else:
                     var_value = os.getenv(var_expr.strip())
                     if var_value is None:
@@ -102,8 +118,12 @@ class ConfigManager:
         return value
     
     def get_database_config(self) -> Dict[str, Any]:
-        """获取数据库配置"""
+        """获取数据库配置（PostgreSQL）"""
         return self.get("database.postgresql", {})
+    
+    def get_neo4j_config(self) -> Dict[str, Any]:
+        """获取 Neo4j 配置"""
+        return self.get("database.neo4j", {})
     
     def get_lightrag_config(self) -> Dict[str, Any]:
         """获取 LightRAG 配置"""

@@ -87,10 +87,14 @@ Agent层 (LangGraph) - 仅负责检索
 
 ### 2. 配置环境变量
 
-复制 `env.example` 为 `.env` 并填写配置：
+复制 `example.env` 为 `.env` 并填写配置：
 
 ```bash
-cp env.example .env
+# Windows (PowerShell)
+Copy-Item example.env .env
+
+# Linux/macOS
+cp example.env .env
 ```
 
 编辑 `.env` 文件，填写必要的配置：
@@ -116,14 +120,31 @@ docker-compose down
 
 ### 4. 本地开发
 
+**推荐使用 `uv` 进行依赖管理**（项目已配置 `uv.lock`）：
+
 ```bash
-# 安装依赖
-pip install -r requirements.txt
+# 安装 uv（如果还没有安装）
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Linux/macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 同步依赖（uv 会自动创建虚拟环境并安装所有依赖）
+uv sync
 
 # 使用 uv 运行脚本（推荐，自动管理虚拟环境和依赖）
-#   uv run scripts/pipeline_fetch.py --repo <repo-url> --output artifacts/01_raw/data.json
-#   uv run scripts/pipeline_clean.py --input artifacts/01_raw/data.json --output artifacts/02_clean/data.json
-#   uv run scripts/pipeline_ingest.py --input artifacts/02_clean/data.json
+uv run scripts/pipeline_fetch.py --repo <repo-url> --output artifacts/01_raw/data.json
+uv run scripts/pipeline_clean.py --input artifacts/01_raw/data.json --output artifacts/02_clean/data.json
+uv run scripts/pipeline_ingest.py --input artifacts/02_clean/data.json
+```
+
+**或者使用传统 pip 方式**（需要手动安装依赖）：
+
+```bash
+# 注意：requirements.txt 仅包含基础工具，实际依赖需要通过 uv 管理
+# 如果使用 pip，需要手动安装所有依赖包
+pip install fastapi uvicorn streamlit langgraph lightrag-hku[api] PyGithub python-dotenv pydantic asyncpg
+```
 
 # 启动 PostgreSQL（如果本地没有）
 docker run -d \

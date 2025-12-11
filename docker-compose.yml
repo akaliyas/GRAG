@@ -19,6 +19,30 @@ services:
     networks:
       - grag_network
 
+  # Neo4j 图数据库
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: grag_neo4j
+    environment:
+      # Neo4j 要求管理员用户名必须是 neo4j，不能修改
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-neo4j_password}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_max__size: 2G
+      NEO4J_dbms_memory_pagecache_size: 1G
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-neo4j_password}", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - grag_network
+
   # FastAPI 后端服务
   api:
     build:
@@ -72,6 +96,8 @@ services:
 
 volumes:
   postgres_data:
+  neo4j_data:
+  neo4j_logs:
 
 networks:
   grag_network:

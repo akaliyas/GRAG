@@ -79,12 +79,12 @@ def check_db_connection():
                 for ext in extensions:
                     print(f"    - {ext['extname']}: {ext['extversion']}")
                 
-                # 检查表
+                # 检查表（使用 ILIKE 进行大小写不敏感匹配）
                 tables = await conn.fetch("""
                     SELECT tablename 
                     FROM pg_tables 
                     WHERE schemaname = 'public' 
-                    AND tablename LIKE 'LIGHTRAG%'
+                    AND tablename ILIKE 'lightrag%'
                     ORDER BY tablename
                 """)
                 
@@ -92,6 +92,13 @@ def check_db_connection():
                     print(f"  LightRAG 表 ({len(tables)} 个):")
                     for table in tables:
                         print(f"    - {table['tablename']}")
+                    
+                    # 检查文档数量
+                    try:
+                        doc_count = await conn.fetchval("SELECT COUNT(*) FROM LIGHTRAG_DOC_FULL")
+                        print(f"  📊 文档数量: {doc_count} 个")
+                    except Exception as e:
+                        print(f"  ⚠️  无法查询文档数量: {e}")
                 else:
                     print(f"  ⚠️  未找到 LightRAG 表（首次运行时会自动创建）")
                 

@@ -12,6 +12,14 @@ database:
     pool_size: 10
     max_overflow: 20
     pool_timeout: 30
+  
+  neo4j:
+    uri: ${NEO4J_URI:neo4j://localhost:7687}
+    username: ${NEO4J_USERNAME:neo4j}
+    password: ${NEO4J_PASSWORD:neo4j_password}
+    database: ${NEO4J_DATABASE:neo4j}
+    max_connection_pool_size: ${NEO4J_MAX_CONNECTION_POOL_SIZE:100}
+    connection_timeout: ${NEO4J_CONNECTION_TIMEOUT:30}
 
 # LightRAG 配置
 lightrag:
@@ -20,7 +28,12 @@ lightrag:
   embedding_provider: ${EMBEDDING_PROVIDER:siliconflow}  # siliconflow, ollama, openai
   embedding_api_key: ${EMBEDDING_API_KEY}  # SiliconFlow 或 OpenAI API key (从环境变量读取)
   embedding_base_url: ${EMBEDDING_BASE_URL:https://api.siliconflow.cn/v1}  # SiliconFlow API 地址
-  storage_type: postgresql  # postgresql 或 neo4j
+  storage_type: ${LIGHTRAG_STORAGE_TYPE:postgresql}  # postgresql 或 neo4j
+  # 存储类型配置（根据 storage_type 选择）
+  kv_storage: ${LIGHTRAG_KV_STORAGE:PGKVStorage}  # PGKVStorage, JsonKVStorage, RedisKVStorage
+  vector_storage: ${LIGHTRAG_VECTOR_STORAGE:PGVectorStorage}  # PGVectorStorage, NanoVectorDBStorage, QdrantVectorDBStorage
+  graph_storage: ${LIGHTRAG_GRAPH_STORAGE:PGGraphStorage}  # PGGraphStorage, Neo4JStorage, NetworkXStorage
+  doc_status_storage: ${LIGHTRAG_DOC_STATUS_STORAGE:PGDocStatusStorage}  # PGDocStatusStorage, JsonDocStatusStorage
   # 实体/关系抽取的 prompt（TODO: 需要根据实际需求调整）
   entity_extraction_prompt: |
     你是一个技术文档实体抽取专家。请从以下文本中提取技术文档相关的实体。

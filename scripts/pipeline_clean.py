@@ -68,7 +68,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def clean_document(raw_doc: RawDoc) -> CleanDoc:
+def clean_document(raw_doc: RawDoc, ingestor) -> CleanDoc:
     """
     清洗单个文档
     
@@ -80,18 +80,14 @@ def clean_document(raw_doc: RawDoc) -> CleanDoc:
     
     Args:
         raw_doc: RawDoc 对象（包含原始内容）
+        ingestor: GitHubIngestor 实例（复用，避免重复初始化）
         
     Returns:
         CleanDoc 对象（清洗后的内容）
     """
-    from agent.tools.github_ingestor import GitHubIngestor
-    
     content = raw_doc.content
     original_length = len(content)
     cleaning_log = []
-    
-    # 创建临时 ingestor 实例用于清洗方法
-    ingestor = GitHubIngestor()
     
     # 步骤 1: Frontmatter 剥离（仅对 Markdown 文件）
     frontmatter = {}
@@ -174,6 +170,10 @@ def main():
         logger.error(f"❌ 读取失败: {e}")
         sys.exit(1)
     
+    # 创建 GitHubIngestor 实例（复用，避免重复初始化）
+    from agent.tools.github_ingestor import GitHubIngestor
+    ingestor = GitHubIngestor()
+    
     # 清洗文档
     logger.info("开始清洗文档...")
     logger.info("  清洗步骤：1. Frontmatter 剥离 2. HTML 标签清理 3. Notebook 清理 4. 链接修复")
@@ -181,7 +181,7 @@ def main():
     
     for i, raw_doc in enumerate(raw_batch.docs, 1):
         try:
-            clean_doc = clean_document(raw_doc)
+            clean_doc = clean_document(raw_doc, ingestor)
             clean_docs.append(clean_doc)
             
             if (i % 10 == 0) or (i == len(raw_batch.docs)):

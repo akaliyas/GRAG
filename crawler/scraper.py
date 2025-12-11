@@ -149,7 +149,7 @@ class DocumentScraper:
         if not self._check_robots_txt(url):
             if self.respect_robots_txt:
                 # 如果明确设置了遵守 robots.txt，且被禁止，应该抛出异常
-                error_msg = f"robots.txt 明确禁止爬取此 URL: {url}。请设置 respect_robots_txt=False 或遵守网站规则。"
+                error_msg = f"robots.txt 明确禁止爬取此 URL: {url}。请设置 respect_robots_txt=False ；要么就遵守网站规则，要么就别爬了。"
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             else:

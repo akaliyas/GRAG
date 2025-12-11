@@ -6,6 +6,8 @@ GitHub 文档提取工具
 import logging
 import os
 import re
+import time
+from tqdm import tqdm
 from typing import List, Dict, Optional, Tuple, Any
 from urllib.parse import urlparse
 
@@ -142,6 +144,21 @@ class GitHubIngestor:
         
         try:
             notebook = nbformat.reads(notebook_content, as_version=4)
+            # 规范化 Notebook（添加缺失的 id 字段，消除警告）
+            # nbformat 5.1.4+ 支持 normalize，旧版本会忽略
+            try:
+                # 尝试使用 normalize 方法（nbformat 5.1.4+）
+                if hasattr(nbformat, 'normalize'):
+                    nbformat.normalize(notebook)
+                else:
+                    # 旧版本手动添加 id 字段
+                    import uuid
+                    for cell in notebook.cells:
+                        if not hasattr(cell, 'id') or not cell.id:
+                            cell.id = str(uuid.uuid4())
+            except (AttributeError, TypeError, ImportError) as e:
+                # 如果 normalize 不可用或出错，记录警告，不影响功能
+                logger.warning(f"nbformat.normalize 不可用或处理 notebook 规范化出错: {e}")
         except Exception as e:
             logger.error(f"解析 Notebook 失败: {e}")
             return notebook_content
@@ -290,6 +307,10 @@ class GitHubIngestor:
         try:
             repo_obj = self.github.get_repo(f"{owner}/{repo}")
             
+            # try to get tqdm
+            if current_path == "":
+                logger.info(f"开始扫描仓库结构：{owner}/{repo}")
+                start_time = time.time()
             # 获取目录内容
             try:
                 contents = repo_obj.get_contents(search_path)
@@ -302,7 +323,10 @@ class GitHubIngestor:
             
             files = []
             
-            for content in contents:
+            # try to get tqdm
+            contents_iter = tqdm(contents, desc="扫描仓库文件",unit="项",disable=(current_path != ""))if current_path == "" else contents
+
+            for content in contents_iter:
                 if content.type == "file":
                     file_path = content.path
                     
