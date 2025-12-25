@@ -107,7 +107,15 @@ class GRAGAgent:
         
         graph.add_edge("github_ingest_tool", "preprocess_tool")
         graph.add_edge("preprocess_tool", "retrieve")
-        graph.add_edge("retrieve", "generate_answer")
+        # retrieve 节点后，根据是否有答案决定是否进入 generate_answer
+        graph.add_conditional_edges(
+            "retrieve",
+            self._route_after_retrieve,
+            {
+                "generate_answer": "generate_answer",
+                "end": END
+            }
+        )
         graph.add_edge("generate_answer", END)
         
         return graph
@@ -189,6 +197,26 @@ class GRAGAgent:
         else:
             return "retrieve"
     
+    def _route_after_retrieve(self, state: AgentState) -> str:
+        """
+        根据检索结果路由到下一个节点
+        
+        Args:
+            state: 当前状态
+            
+        Returns:
+            下一个节点名称
+        """
+        if state.get("error"):
+            return "end"
+        
+        # 如果 LightRAG 已经生成了答案，直接结束
+        if state.get("answer"):
+            return "end"
+        
+        # 如果没有答案，进入生成答案节点
+        return "generate_answer"
+    
     @track_performance("github_ingest_tool")
     def _github_ingest_tool(self, state: AgentState) -> AgentState:
         """
@@ -268,13 +296,21 @@ class GRAGAgent:
                 state["error"] = "查询文本为空"
                 return state
             
-            # 使用 LightRAG 进行检索
+            # 使用 LightRAG 进行检索（LightRAG 已经基于上下文生成了答案）
             result = self.lightrag.query(query, mode="hybrid", top_k=5)
             
+            # 保存检索结果
             state["context_ids"] = result.get("context_ids", [])
             state["documents"] = result.get("contexts", [])
             
-            logger.info(f"检索完成: {len(state['context_ids'])} 个上下文")
+            # LightRAG 已经生成了答案，直接使用
+            # 如果答案为空，则在 generate_answer 节点中基于上下文重新生成
+            answer = result.get("answer", "")
+            if answer:
+                state["answer"] = answer
+                logger.info(f"检索完成: {len(state['context_ids'])} 个上下文，已获取答案")
+            else:
+                logger.info(f"检索完成: {len(state['context_ids'])} 个上下文，答案为空，将在下一步生成")
         except Exception as e:
             logger.error(f"检索失败: {e}")
             state["error"] = str(e)
@@ -293,8 +329,21 @@ class GRAGAgent:
             更新后的状态
         """
         try:
+            # 如果 LightRAG 已经生成了答案，直接使用
+            answer = state.get("answer", "")
+            if answer:
+                logger.info("使用 LightRAG 生成的答案")
+                return state
+            
+            # 如果答案为空，基于上下文重新生成
             query = state.get("query", "")
             contexts = state.get("documents", [])
+            
+            if not contexts:
+                # 如果没有上下文，生成一个提示性答案
+                state["answer"] = "抱歉，我没有找到相关的上下文信息来回答这个问题。请尝试使用更具体的关键词，或者确保知识库中已包含相关信息。"
+                logger.warning("没有上下文信息，返回提示性答案")
+                return state
             
             # 构建 prompt
             context_text = "\n\n".join(contexts[:5])  # 取前 5 个上下文
@@ -318,7 +367,7 @@ class GRAGAgent:
             answer = response.choices[0].message.content
             state["answer"] = answer
             
-            logger.info("答案生成完成")
+            logger.info("答案生成完成（基于上下文）")
         except Exception as e:
             logger.error(f"生成答案失败: {e}")
             state["error"] = str(e)

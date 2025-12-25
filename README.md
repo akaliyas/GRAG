@@ -257,6 +257,7 @@ curl -X GET "http://localhost:8000/api/v1/stats" \
 
 ### 专项文档
 
+- **[技术路线图 2025](docs/TECHNOLOGY_ROADMAP_2025.md)** ⭐ - 基于 2025 年研究报告的技术选型指导、进度评估和未来规划
 - **[API 认证文档](docs/API_AUTHENTICATION.md)** - HTTP Basic 认证、安全配置
 - **[PostgreSQL 配置文档](docs/POSTGRESQL_CONFIG.md)** - 数据库配置、存储后端
 

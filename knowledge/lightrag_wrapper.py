@@ -877,31 +877,78 @@ class LightRAGWrapper:
             查询结果字典，包含 answer, contexts, entities 等
         """
         try:
-            # TODO: 根据实际 LightRAG API 调整查询参数
+            # 构建查询参数
             query_param = QueryParam(
                 mode=mode,
                 top_k=top_k
             )
             
-            result = self.rag.query(query, query_param)
+            # 1. 获取答案（使用 query 方法）
+            answer_result = self.rag.query(query, query_param)
             
             # LightRAG.query() 返回 str 或 Iterator[str]，不是字典
             # 需要统一处理为字符串答案
-            if result is None:
+            if answer_result is None:
                 answer = ""
-            elif isinstance(result, str):
-                answer = result
+            elif isinstance(answer_result, str):
+                answer = answer_result
             else:
                 # 如果是迭代器，收集所有内容
-                answer = "".join(result) if hasattr(result, '__iter__') else str(result)
+                answer = "".join(answer_result) if hasattr(answer_result, '__iter__') else str(answer_result)
+            
+            # 2. 获取上下文数据（使用 query_data 方法）
+            try:
+                data_result = self.rag.query_data(query, query_param)
+                
+                # 提取上下文信息
+                contexts = []
+                context_ids = []
+                entities = []
+                relations = []
+                
+                if data_result.get("status") == "success":
+                    data = data_result.get("data", {})
+                    
+                    # 提取 chunks（文档片段）
+                    chunks = data.get("chunks", [])
+                    for chunk in chunks:
+                        content = chunk.get("content", "")
+                        chunk_id = chunk.get("chunk_id", "")
+                        if content:
+                            contexts.append(content)
+                        if chunk_id:
+                            context_ids.append(chunk_id)
+                    
+                    # 提取 entities（实体）
+                    entities_list = data.get("entities", [])
+                    for entity in entities_list:
+                        entity_name = entity.get("entity_name", "")
+                        if entity_name:
+                            entities.append(entity_name)
+                    
+                    # 提取 relationships（关系）
+                    relationships = data.get("relationships", [])
+                    for rel in relationships:
+                        rel_desc = rel.get("description", "")
+                        if rel_desc:
+                            relations.append(rel_desc)
+                
+                logger.info(f"检索到 {len(contexts)} 个上下文片段, {len(entities)} 个实体, {len(relations)} 个关系")
+                
+            except Exception as e:
+                logger.warning(f"获取上下文数据失败（不影响答案生成）: {e}")
+                contexts = []
+                context_ids = []
+                entities = []
+                relations = []
             
             # 格式化返回结果
             return {
                 'answer': answer,
-                'contexts': [],
-                'entities': [],
-                'relations': [],
-                'context_ids': []
+                'contexts': contexts,
+                'entities': entities,
+                'relations': relations,
+                'context_ids': context_ids
             }
         except Exception as e:
             logger.error(f"查询失败: {e}")
