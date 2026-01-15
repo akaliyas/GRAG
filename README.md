@@ -17,6 +17,7 @@
 - 🔄 **流式响应**：支持流式输出，提升用户体验
 - 🎯 **Zero-Crawler 策略**：完全去爬虫化，仅使用 GitHub API 作为数据源（Source Code is Truth）
 - 📝 **原生结构化数据**：直接获取 Markdown 和 Jupyter Notebook 源码，自动清理 HTML 标签（包括 tfo-notebook-buttons 等导航元素），确保数据纯净
+- 🖥️ **多页面 GUI**：Streamlit 三页面界面（聊天、管道管理、仪表盘），支持可视化操作和监控
 
 ## 系统架构
 
@@ -64,7 +65,7 @@ Agent层 (LangGraph) - 仅负责检索
 - Agent 只负责检索，不涉及数据采集
 - 基于已构建的索引回答问题
 
-详细架构说明：参见 [Pipeline 架构文档](docs/PIPELINE_ARCHITECTURE.md)
+详细架构说明：参见本文档的"系统架构"部分
 
 ## 技术栈
 
@@ -168,6 +169,32 @@ streamlit run frontend/app.py
 - **前端界面**：http://localhost:8501
 - **健康检查**：http://localhost:8000/health
 
+### 6. Web GUI 使用指南
+
+本系统提供功能丰富的 Streamlit 多页面 GUI，包含以下功能模块：
+
+#### 💬 聊天页面
+- **智能对话**：实时问答界面，支持中英文查询
+- **历史搜索**：关键词搜索聊天历史记录
+- **导出功能**：支持导出为 JSON、TXT、Markdown 格式
+- **质量反馈**：👍/👎 反馈按钮，帮助优化系统
+- **详细统计**：显示响应时间、模型类型、缓存状态
+
+#### 🔄 管道管理页面
+- **可视化流程**：三步管道（Fetch → Clean → Ingest）可视化展示
+- **状态监控**：实时显示每个步骤的运行状态
+- **参数配置**：灵活配置每个步骤的输入输出参数
+- **一键执行**：支持一键执行完整管道流程
+- **文件浏览**：Artifacts 目录文件浏览器
+- **日志查看**：查看每个步骤的详细输出日志
+
+#### 📊 仪表盘页面
+- **系统健康**：API、数据库、服务组件状态监控
+- **性能指标**：API 调用次数、响应时间、缓存统计
+- **自动刷新**：可配置的自动刷新间隔（5/10/30/60秒）
+- **快速操作**：清空缓存、导出日志、重启服务
+- **活动日志**：最近系统活动日志查看
+
 ## 使用说明
 
 ### API 使用示例
@@ -242,24 +269,17 @@ curl -X GET "http://localhost:8000/api/v1/stats" \
 
 ## 文档索引
 
-### 核心模块文档
+### 项目文档
 
-- **[Pipeline 架构文档](docs/PIPELINE_ARCHITECTURE.md)** ⭐ - 核心架构设计：Pipeline for Write, Service for Read
-- **[开发规则文档](docs/DEVELOPMENT_RULES.md)** ⭐ - 开发约定：uv 使用、脚本执行、代码风格
-- **[API 层文档](docs/API_LAYER.md)** - API 接口、路由、认证机制
-- **[Agent 层文档](docs/AGENT_LAYER.md)** - LangGraph Agent、工作流、意图识别（已简化，仅负责检索）
-- **[模型层文档](docs/MODEL_LAYER.md)** - 模型管理、动态切换、健康检查
-- **[知识存储层文档](docs/KNOWLEDGE_LAYER.md)** - LightRAG 封装、双层检索、文档管理
-- **[存储层文档](docs/STORAGE_LAYER.md)** - 缓存管理、LRU 清理、质量评分
-- **[工具层文档](docs/TOOLS_LAYER.md)** - GitHub 提取工具、Zero-Crawler 策略、Pydantic Schema
-- **[配置管理文档](docs/CONFIG_MANAGEMENT.md)** - 配置加载、环境变量解析
-- **[前端文档](docs/FRONTEND.md)** - Streamlit 界面、API 集成
+- **[项目结构说明](PROJECT_STRUCTURE.md)** - 项目目录结构、核心模块说明
+- **[快速检查清单](QUICK_CHECK.md)** - 环境检查、数据库测试、管道测试
 
 ### 专项文档
 
 - **[技术路线图 2025](docs/TECHNOLOGY_ROADMAP_2025.md)** ⭐ - 基于 2025 年研究报告的技术选型指导、进度评估和未来规划
-- **[API 认证文档](docs/API_AUTHENTICATION.md)** - HTTP Basic 认证、安全配置
-- **[PostgreSQL 配置文档](docs/POSTGRESQL_CONFIG.md)** - 数据库配置、存储后端
+- **[Agent 测试报告](docs/AGENT_TEST_REPORT.md)** - Agent 模块功能测试结果和性能指标
+- **[Neo4j 设置文档](docs/NEO4J_SETUP.md)** - Neo4j 图数据库配置和连接说明
+- **[数据摄入文档](docs/OPENAI_COOKBOOK_INGESTION.md)** - OpenAI Cookbook 数据提取和清洗流程
 
 ## 多智能体协作规范
 

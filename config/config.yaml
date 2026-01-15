@@ -118,7 +118,7 @@ api:
   version: 1.0.0
   # 认证配置
   auth:
-    enabled: true
+    enabled: false
     username: ${API_USERNAME:admin}
     password: ${API_PASSWORD}  # 从环境变量读取
 
