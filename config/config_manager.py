@@ -145,6 +145,11 @@ class ConfigManager:
         """获取日志配置"""
         return self.get("logging", {})
 
+    @property
+    def config(self) -> Dict[str, Any]:
+        """获取完整配置字典（用于需要直接访问配置的场景）"""
+        return self._config
+
 
 @lru_cache()
 def get_config() -> ConfigManager:

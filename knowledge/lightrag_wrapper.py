@@ -181,6 +181,9 @@ class LightRAGWrapper:
                     logger.error(f"💡 提示: 检查数据库连接 - Host: {db_config.get('host')}, Port: {db_config.get('port')}, Database: {db_config.get('database')}")
                 raise RuntimeError(f"数据库初始化失败: {error_msg}") from e
         
+        # 存储存储类型（供外部访问）
+        self.storage_type = storage_type
+
         logger.info(f"LightRAG 已初始化，存储类型: {storage_type}")
         logger.info(f"  KV存储: {kv_storage}, 向量存储: {vector_storage}, 图存储: {graph_storage}")
         logger.info(f"  嵌入模型: {lightrag_config.get('embedding_model', 'unknown')}, "

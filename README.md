@@ -86,7 +86,24 @@ Agent层 (LangGraph) - 仅负责检索
 - Docker & Docker Compose（推荐）
 - PostgreSQL 15+（如果不用 Docker）
 
-### 2. 配置环境变量
+### 2. 环境验证（推荐）
+
+在开始之前，运行环境验证脚本确保所有配置正确：
+
+```powershell
+# PowerShell 环境验证
+powershell -ExecutionPolicy Bypass -File scripts/verify_environment.ps1
+```
+
+该脚本会检查：
+- Python、uv、Docker 是否安装
+- 所有 Python 依赖是否完整
+- .env 和 config.yaml 文件是否存在
+- 环境变量是否正确配置
+- Docker 服务是否运行
+- 数据库连接是否正常
+
+### 3. 配置环境变量
 
 复制 `example.env` 为 `.env` 并填写配置：
 

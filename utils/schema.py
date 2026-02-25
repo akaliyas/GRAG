@@ -79,7 +79,7 @@ class IngestionBatch(BaseModel):
 class CleanDoc(BaseModel):
     """清洗后的文档模型（Clean Artifact）
     
-    这是 LightRAG 的黄金输入，已清洗 HTML、去除 Notebook 噪音、修复链接。
+    LightRAG 的高质量输入，已清洗 HTML、去除 Notebook 噪音、修复链接。
     必须继承 RawDoc 的关键字段（doc_id, source_url, file_path），确保溯源能力。
     """
     

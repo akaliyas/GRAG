@@ -1,7 +1,8 @@
 """
 聊天页面 - 增强版
-支持历史记录、搜索、导出等功能
+支持历史记录、搜索、导出、会话持久化等功能
 """
+import logging
 import streamlit as st
 import requests
 import json
@@ -9,6 +10,16 @@ import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
+
+# Import session manager
+import sys
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from frontend.storage.session_manager import FileSessionManager, generate_session_title
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # API 配置
 API_BASE_URL = "http://localhost:8000/api/v1"
@@ -24,17 +35,54 @@ try:
 except (FileNotFoundError, KeyError):
     API_PASSWORD = ""
 
+# Initialize session manager (文件系统存储，持久化)
+session_manager = FileSessionManager()
+logger.info("文件会话管理器已初始化")
+
 
 def init_session_state():
-    """初始化会话状态"""
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    """
+    初始化会话状态
+
+    自动加载最新的会话历史，或创建新会话。
+    会话数据持久化到文件系统，刷新或重启浏览器后保留。
+    """
+    # Initialize basic session state variables
     if "search_query" not in st.session_state:
         st.session_state.search_query = ""
     if "export_format" not in st.session_state:
         st.session_state.export_format = "json"
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # Initialize debouncing state to prevent multiple session creation
+    if "creating_session" not in st.session_state:
+        st.session_state.creating_session = False
+
+    # Initialize session creation counter to prevent duplicate creations
+    if "session_creation_counter" not in st.session_state:
+        st.session_state.session_creation_counter = 0
+
+    # Session persistence - load or create session
+    if "current_session_id" not in st.session_state:
+        # Try to load the latest session
+        latest_session = session_manager.get_latest_session()
+
+        if latest_session:
+            # Load existing session
+            st.session_state.current_session_id = latest_session["session_id"]
+            st.session_state.chat_messages = latest_session.get("messages", [])
+            logger.info(f"Loaded existing session: {latest_session['session_id']}")
+        else:
+            # Create new session
+            session_id = session_manager.create_session()
+            st.session_state.current_session_id = session_id
+            st.session_state.chat_messages = []
+            logger.info(f"Created new session: {session_id}")
+
+    # Ensure chat_messages exists
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
 
 
 def get_auth_headers():
@@ -44,21 +92,416 @@ def get_auth_headers():
     return {"Authorization": f"Basic {encoded}"}
 
 
-def query_api(query: str, stream: bool = False) -> Optional[dict]:
-    """调用 API 进行查询"""
+def save_current_session() -> bool:
+    """
+    保存当前会话到文件系统
+
+    在每次发送消息后自动调用，将对话历史持久化到 JSON 文件。
+    刷新或重启浏览器后，会话数据仍然保留。
+
+    Returns:
+        bool: 保存是否成功
+    """
     try:
-        url = f"{API_BASE_URL}/query/stream" if stream else f"{API_BASE_URL}/query"
+        if "current_session_id" not in st.session_state:
+            logger.warning("没有会话 ID 可保存")
+            return False
+
+        # 从第一条用户消息生成标题
+        title = generate_session_title(st.session_state.chat_messages)
+
+        # 准备元数据
+        metadata = {
+            "model_type": "unknown",
+            "saved_at": datetime.now().isoformat(),
+        }
+
+        # 尝试从最后一条助手消息中获取模型类型
+        for msg in reversed(st.session_state.chat_messages):
+            if msg.get("role") == "assistant" and "model_type" in msg:
+                metadata["model_type"] = msg["model_type"]
+                break
+
+        # 保存会话
+        success = session_manager.save_session(
+            session_id=st.session_state.current_session_id,
+            messages=st.session_state.chat_messages,
+            title=title,
+            metadata=metadata,
+        )
+
+        if success:
+            logger.debug(f"会话保存成功: {st.session_state.current_session_id}")
+
+        return success
+
+    except Exception as e:
+        logger.error(f"保存会话时出错: {e}")
+        return False
+
+
+def format_timestamp(timestamp_str: str) -> str:
+    """
+    格式化时间戳为易读格式
+
+    Args:
+        timestamp_str: ISO 格式的时间戳字符串
+
+    Returns:
+        格式化后的时间字符串，如 "02-24 10:30"
+    """
+    try:
+        dt = datetime.fromisoformat(timestamp_str)
+        return dt.strftime("%m-%d %H:%M")
+    except Exception:
+        return timestamp_str
+
+
+def switch_session(session_id: str) -> bool:
+    """
+    切换到指定会话
+
+    Args:
+        session_id: 要切换到的会话 ID
+
+    Returns:
+        切换成功返回 True，失败返回 False
+    """
+    try:
+        # 先保存当前会话
+        save_current_session()
+
+        # 加载目标会话
+        session_data = session_manager.load_session(session_id)
+        if not session_data:
+            logger.error(f"无法加载会话: {session_id}")
+            return False
+
+        # 更新会话状态
+        st.session_state.current_session_id = session_id
+        st.session_state.chat_messages = session_data.get("messages", [])
+
+        logger.info(f"切换到会话: {session_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"切换会话失败: {e}")
+        return False
+
+
+def create_new_session() -> bool:
+    """
+    创建新会话
+
+    保存当前会话后，创建一个全新的空会话。
+    强制更新 session_manager 的当前会话状态以确保 UI 同步。
+
+    Returns:
+        创建成功返回 True，失败返回 False
+    """
+    try:
+        # 先保存当前会话
+        save_current_session()
+
+        # 创建新会话
+        new_session_id = session_manager.create_session()
+
+        # 切换到新会话
+        st.session_state.current_session_id = new_session_id
+        st.session_state.chat_messages = []
+
+        # 强制更新 session_manager 的当前会话
+        session_manager.set_current_session(new_session_id)
+
+        logger.info(f"创建新会话: {new_session_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"创建新会话失败: {e}")
+        return False
+
+
+def delete_session_with_confirmation(session_id: str, session_title: str) -> bool:
+    """
+    删除会话（带确认）
+
+    Args:
+        session_id: 要删除的会话 ID
+        session_title: 会话标题（用于确认提示）
+
+    Returns:
+        删除成功返回 True，取消或失败返回 False
+    """
+    try:
+        # 不允许删除当前会话
+        if session_id == st.session_state.get("current_session_id"):
+            st.error("无法删除当前正在使用的会话")
+            return False
+
+        # 删除会话
+        success = session_manager.delete_session(session_id)
+        if success:
+            logger.info(f"删除会话成功: {session_id}")
+            return True
+        else:
+            st.error("删除失败")
+            return False
+
+    except Exception as e:
+        logger.error(f"删除会话失败: {e}")
+        st.error(f"删除失败: {e}")
+        return False
+
+
+def export_all_sessions() -> tuple[str, str]:
+    """
+    导出所有会话为 JSON
+
+    Returns:
+        (filename, content) 文件名和内容
+    """
+    try:
+        sessions = session_manager.list_sessions()
+
+        export_data = {
+            "export_time": datetime.now().isoformat(),
+            "total_sessions": len(sessions),
+            "sessions": []
+        }
+
+        for session_meta in sessions:
+            session_id = session_meta.get("session_id")
+            if session_id:
+                session_data = session_manager.load_session(session_id)
+                if session_data:
+                    export_data["sessions"].append(session_data)
+
+        content = json.dumps(export_data, ensure_ascii=False, indent=2)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"grag_sessions_backup_{timestamp}.json"
+
+        return filename, content
+
+    except Exception as e:
+        logger.error(f"导出会话失败: {e}")
+        raise
+
+
+def render_session_sidebar():
+    """
+    渲染会话管理侧边栏
+
+    显示所有历史会话，支持切换、创建、删除操作。
+    """
+    with st.sidebar:
+        st.markdown("### 💬 我的对话")
+
+        # 新建对话按钮 - 使用计数器防止重复点击
+        # 获取当前计数器值（作为唯一标识符）
+        current_counter = st.session_state.get("session_creation_counter", 0)
+
+        if st.button(
+            "➕ 新建对话",
+            use_container_width=True,
+            type="primary",
+            key=f"create_session_btn_{current_counter}",
+            disabled=st.session_state.get("creating_session", False)
+        ):
+            # 防止重复执行：检查是否已在创建中
+            if not st.session_state.get("creating_session", False):
+                # 标记开始创建
+                st.session_state.creating_session = True
+
+                # 执行创建
+                success = create_new_session()
+
+                # 增加计数器，使按钮的 key 在下次 rerun 时改变
+                # 这会导致旧按钮的点击状态被清除，防止重复触发
+                st.session_state.session_creation_counter = current_counter + 1
+
+                # 重置创建标志
+                st.session_state.creating_session = False
+
+                # 刷新 UI
+                if success:
+                    st.rerun()
+                else:
+                    st.error("创建会话失败")
+
+        st.markdown("---")
+
+        # 获取会话列表
+        sessions = session_manager.list_sessions()
+        current_session_id = st.session_state.get("current_session_id", "")
+
+        # 显示会话列表
+        if sessions:
+            st.markdown("#### 📚 历史对话")
+
+            for idx, session in enumerate(sessions):
+                session_id = session.get("session_id", "")
+                title = session.get("title", "新对话")
+                updated_at = session.get("updated_at", "")
+                message_count = session.get("message_count", 0)
+
+                # 检查是否是当前会话
+                is_current = (session_id == current_session_id)
+
+                # 格式化时间
+                time_str = format_timestamp(updated_at)
+
+                # 创建会话项
+                with st.container():
+                    # 使用 columns 布局：标题 + 删除按钮
+                    col_title, col_delete = st.columns([4, 1])
+
+                    with col_title:
+                        # 会话标题和点击区域
+                        if is_current:
+                            st.markdown(f"**🔹 {title}**")
+                        else:
+                            # 使用 button 模拟可点击区域
+                            button_label = f"📝 {title}"
+                            if st.button(
+                                button_label,
+                                key=f"switch_{session_id}",
+                                help="点击切换到此对话"
+                            ):
+                                if switch_session(session_id):
+                                    st.rerun()
+
+                    with col_delete:
+                        # 删除按钮
+                        if not is_current:
+                            if st.button(
+                                "🗑️",
+                                key=f"delete_{session_id}",
+                                help="删除此对话",
+                                disabled=is_current
+                            ):
+                                delete_session_with_confirmation(session_id, title)
+                                st.rerun()
+
+                    # 显示元数据
+                    st.caption(
+                        f"🕒 {time_str} | 💬 {message_count} 条消息"
+                    )
+
+                    # 添加分隔线（最后一个会话不需要）
+                    if idx < len(sessions) - 1:
+                        st.markdown("---")
+
+        else:
+            # 空状态
+            st.info("📭 暂无历史对话")
+            st.markdown("开始新的对话吧！")
+
+        st.markdown("---")
+
+        # 导入/导出区域
+        st.markdown("#### 📦 数据管理")
+
+        col_import, col_export = st.columns(2)
+
+        with col_export:
+            if st.button("📤 导出全部", use_container_width=True):
+                try:
+                    filename, content = export_all_sessions()
+                    st.download_button(
+                        label="下载",
+                        data=content,
+                        file_name=filename,
+                        mime="application/json",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"导出失败: {e}")
+
+        with col_import:
+            # 导入功能（预留接口）
+            if st.button("📥 导入", use_container_width=True):
+                st.info("导入功能开发中...")
+
+        # 侧边栏底部信息
+        st.markdown("---")
+        st.caption("💡 提示：对话会自动保存到浏览器")
+
+
+def query_api_stream(query: str):
+    """
+    流式调用 API - 处理 SSE 格式
+
+    带有超时和块数限制，防止无限循环。
+
+    Args:
+        query: 用户查询文本
+
+    Yields:
+        dict: SSE 数据块，格式：
+            - {"content": "...", "done": false} - 内容块
+            - {"content": "", "done": true, ...} - 结束块
+            - {"error": "..."} - 错误块
+    """
+    try:
+        url = f"{API_BASE_URL}/query/stream"
         response = requests.post(
             url,
-            json={"query": query, "use_cache": True, "stream": stream},
+            json={"query": query, "use_cache": True, "stream": True},
             headers=get_auth_headers(),
-            stream=stream,
-            timeout=60
+            stream=True,
+            timeout=120
         )
-        response.raise_for_status()
-        return response.json() if not stream else {"stream": True, "response": response}
+
+        if not response.ok:
+            # 解析后端返回的详细错误（如 FastAPI detail）
+            try:
+                body = response.json()
+                msg = body.get("detail", str(body))
+                if isinstance(msg, list):
+                    msg = msg[0].get("msg", str(msg)) if msg else response.reason
+                elif not isinstance(msg, str):
+                    msg = str(msg)
+            except Exception:
+                msg = f"{response.status_code} {response.reason}"
+            yield {"error": msg}
+            return
+
+        chunk_count = 0
+        MAX_CHUNKS = 10000  # 防止无限循环
+
+        for line in response.iter_lines():
+            # 跳过空行和非字节类型的数据
+            if not line or not isinstance(line, bytes):
+                continue
+
+            try:
+                line = line.decode('utf-8')
+            except (UnicodeDecodeError, AttributeError):
+                continue
+
+            if line.startswith('data: '):
+                chunk_count += 1
+                if chunk_count > MAX_CHUNKS:
+                    logger.warning(f"流式响应超过最大块数限制 ({MAX_CHUNKS})，已中断")
+                    yield {"error": "响应过长，已中断"}
+                    return
+
+                try:
+                    data = json.loads(line[6:])
+                    if isinstance(data, dict):
+                        yield data
+                        # 检查是否完成
+                        if data.get("done"):
+                            return
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+    except requests.exceptions.Timeout:
+        yield {"error": "请求超时，请稍后重试"}
+    except requests.exceptions.ConnectionError:
+        yield {"error": "无法连接后端服务，请确认 API 已启动 (http://localhost:8000)"}
     except Exception as e:
-        return None
+        yield {"error": str(e)}
 
 
 def submit_feedback(query: str, is_positive: bool):
@@ -119,10 +562,32 @@ def export_chat(messages: List[Dict], format_type: str = "json") -> str:
 
 
 def show():
-    """显示聊天页面"""
+    """
+    显示聊天页面
+
+    主函数，渲染完整的聊天界面，包括：
+    - 侧边栏：会话管理
+    - 主区域：对话历史和输入框
+    """
+    # 初始化会话状态
     init_session_state()
 
+    # 渲染会话管理侧边栏
+    render_session_sidebar()
+
+    # 主区域标题
     st.subheader("💬 智能对话")
+
+    # 显示当前会话信息
+    current_session_id = st.session_state.get("current_session_id", "")
+    if current_session_id:
+        sessions = session_manager.list_sessions()
+        current_session = next(
+            (s for s in sessions if s.get("session_id") == current_session_id),
+            None
+        )
+        if current_session:
+            st.caption(f"📌 {current_session.get('title', '新对话')}")
 
     # 显示聊天消息
     for idx, message in enumerate(st.session_state.chat_messages):
@@ -160,41 +625,93 @@ def show():
 
     # 处理用户输入
     if prompt:
-        # 添加用户消息
+        # 添加用户消息到对话历史
         st.session_state.chat_messages.append({
             "role": "user",
             "content": prompt,
             "timestamp": datetime.now().isoformat()
         })
 
-        # 调用 API
-        with st.spinner("正在思考..."):
-            result = query_api(prompt)
+        # 流式输出助手回复
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
+            metadata = {}
 
-        # 显示助手回复
-        if result and result.get("success"):
-            answer = result.get("answer", "")
+            # 创建一个状态容器来控制加载状态
+            status_container = st.container()
+            with status_container:
+                status_placeholder = st.empty()
 
-            # 保存助手消息
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": answer,
-                "query": prompt,
-                "answer": answer,
-                "response_time": result.get("response_time", 0),
-                "model_type": result.get("model_type", "unknown"),
-                "from_cache": result.get("from_cache", False),
-                "timestamp": datetime.now().isoformat()
-            })
-        else:
-            error_msg = result.get("error", "查询失败") if result else "API 调用失败"
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": f"❌ {error_msg}",
-                "timestamp": datetime.now().isoformat()
-            })
+            # 显示初始加载状态
+            status_placeholder.info("正在思考...")
 
-        st.rerun()
+            # 流式处理响应
+            first_chunk = True
+            chunk_count = 0
+            MAX_CHUNKS = 10000  # 防止无限循环
+
+            for chunk in query_api_stream(prompt):
+                chunk_count += 1
+                if chunk_count > MAX_CHUNKS:
+                    full_response += "\n\n[错误: 响应过长，已中断]"
+                    logger.warning(f"响应超过最大块数限制 ({MAX_CHUNKS})，已中断")
+                    status_placeholder.empty()
+                    break
+
+                # 清除加载状态（在第一个有效块时）
+                if first_chunk and "content" in chunk:
+                    status_placeholder.empty()
+                    first_chunk = False
+
+                # 处理错误
+                if "error" in chunk:
+                    full_response = f"错误: {chunk['error']}"
+                    message_placeholder.error(full_response)
+                    status_placeholder.empty()
+                    break
+
+                # 处理内容
+                if "content" in chunk and chunk["content"]:
+                    full_response += chunk["content"]
+                    # 显示带光标的文本（打字效果）
+                    message_placeholder.markdown(full_response + "▌")
+
+                # 处理结束标记
+                if "done" in chunk and chunk["done"]:
+                    # 保存元数据
+                    metadata = {
+                        "response_time": chunk.get("response_time", 0),
+                        "model_type": chunk.get("model_type", "unknown"),
+                        "from_cache": chunk.get("from_cache", False),
+                        "context_ids": chunk.get("context_ids", []),
+                        "intent": chunk.get("intent", "")
+                    }
+                    status_placeholder.empty()
+                    break
+
+            # 最终显示（去掉光标）
+            message_placeholder.markdown(full_response)
+
+        # 保存完整消息到对话历史
+        assistant_message = {
+            "role": "assistant",
+            "content": full_response,
+            "query": prompt,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # 添加元数据（如果有）
+        if metadata:
+            assistant_message.update(metadata)
+
+        st.session_state.chat_messages.append(assistant_message)
+
+        # 自动保存会话（持久化到浏览器存储）
+        save_current_session()
+
+        # 注意：不要在这里调用 st.rerun()，否则会导致无限循环
+        # Streamlit 的聊天界面会自动更新，无需手动刷新
 
     # 底部工具栏（展开式）
     with st.expander("🔍 搜索和导出", expanded=False):
