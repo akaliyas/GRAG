@@ -374,14 +374,166 @@ class GRAGAgent:
         
         return state
     
+    async def process_query_stream(
+        self,
+        query: str,
+        use_cache: bool = True
+    ):
+        """
+        流式处理查询，异步生成 SSE 格式的响应块
+
+        真正的流式响应：检索完成后，实时流式传输 LLM 生成的每个 token。
+
+        Args:
+            query: 查询文本
+            use_cache: 是否使用缓存
+
+        Yields:
+            dict: SSE 格式的响应块，格式：
+                - {"content": "...", "done": false} - 内容块
+                - {"content": "", "done": true, "context_ids": [...], ...} - 结束块
+        """
+        import time
+        import asyncio
+
+        start_time = time.time()
+
+        try:
+            # Step 1: 检索阶段（非流式）
+            # 直接调用 LightRAG 进行检索
+            result = self.lightrag.query(query, mode="hybrid", top_k=5)
+
+            context_ids = result.get("context_ids", [])
+            contexts = result.get("contexts", [])
+
+            # Step 2: 流式生成答案
+            # 如果 LightRAG 已返回答案，流式发送
+            light_rag_answer = result.get("answer", "")
+
+            if light_rag_answer:
+                # LightRAG 已生成答案，流式发送
+                full_answer = ""
+                for char in light_rag_answer:
+                    full_answer += char
+                    yield {
+                        "content": char,
+                        "done": False
+                    }
+                    await asyncio.sleep(0.005)  # 轻微延迟模拟打字效果
+
+                # 发送结束标记
+                response_time = time.time() - start_time
+                yield {
+                    "content": "",
+                    "done": True,
+                    "full_answer": full_answer,
+                    "context_ids": context_ids,
+                    "response_time": response_time,
+                    "model_type": self.model_manager.get_current_model_type(),
+                    "from_cache": False,
+                    "intent": "query"
+                }
+                return
+
+            # Step 3: 如果没有上下文，返回提示
+            if not contexts:
+                response_time = time.time() - start_time
+                yield {
+                    "content": "抱歉，我没有找到相关的上下文信息来回答这个问题。请尝试使用更具体的关键词，或者确保知识库中已包含相关信息。",
+                    "done": True,
+                    "full_answer": "抱歉，我没有找到相关的上下文信息来回答这个问题。",
+                    "context_ids": [],
+                    "response_time": response_time,
+                    "model_type": self.model_manager.get_current_model_type(),
+                    "from_cache": False,
+                    "intent": "query"
+                }
+                return
+
+            # Step 4: 基于上下文流式生成答案
+            # 构建 prompt
+            context_text = "\n\n".join(contexts[:5])
+            prompt = f"""基于以下上下文回答用户问题。如果上下文中没有相关信息，请说明。
+
+上下文：
+{context_text}
+
+问题：{query}
+
+答案："""
+
+            # 使用流式 API 调用
+            full_answer = ""
+            try:
+                # 调用流式 chat_completion
+                stream_response = self.model_manager.chat_completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=2000,
+                    stream=True  # 启用流式
+                )
+
+                # 处理流式响应
+                for chunk in stream_response:
+                    if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if hasattr(delta, 'content') and delta.content:
+                            content = delta.content
+                            full_answer += content
+                            yield {
+                                "content": content,
+                                "done": False
+                            }
+
+            except Exception as stream_error:
+                logger.warning(f"流式生成失败，回退到非流式: {stream_error}")
+                # 回退到非流式
+                response = self.model_manager.chat_completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=2000,
+                    stream=False
+                )
+                full_answer = response.choices[0].message.content
+                # 流式发送完整答案
+                for char in full_answer:
+                    yield {
+                        "content": char,
+                        "done": False
+                    }
+                    await asyncio.sleep(0.005)
+
+            # 发送结束标记
+            response_time = time.time() - start_time
+            yield {
+                "content": "",
+                "done": True,
+                "full_answer": full_answer,
+                "context_ids": context_ids,
+                "response_time": response_time,
+                "model_type": self.model_manager.get_current_model_type(),
+                "from_cache": False,
+                "intent": "query"
+            }
+
+        except Exception as e:
+            logger.error(f"流式查询失败: {e}")
+            import traceback
+            traceback.print_exc()
+            yield {
+                "content": f"错误: {str(e)}",
+                "done": True,
+                "error": str(e)
+            }
+
     def query(self, query: str, stream: bool = False) -> Dict[str, Any]:
         """
         执行查询
-        
+
         Args:
             query: 查询文本
-            stream: 是否流式返回
-            
+            stream: 是否流式返回（已弃用，请使用 process_query_stream）
+
         Returns:
             查询结果字典
         """
@@ -398,18 +550,18 @@ class GRAGAgent:
             "answer": "",
             "error": None
         }
-        
+
         # 运行 Agent
         try:
             final_state = self.app.invoke(initial_state)
-            
+
             if final_state.get("error"):
                 return {
                     "success": False,
                     "error": final_state["error"],
                     "answer": ""
                 }
-            
+
             return {
                 "success": True,
                 "answer": final_state.get("answer", ""),

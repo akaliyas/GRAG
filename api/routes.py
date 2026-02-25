@@ -184,7 +184,7 @@ def query(
 
 
 @router.post("/query/stream")
-def query_stream(
+async def query_stream(
     request: QueryRequest,
     username: str = Depends(verify_credentials),
     agent: GRAGAgent = Depends(get_agent),
@@ -192,46 +192,88 @@ def query_stream(
     model_manager: ModelManager = Depends(get_model_manager)
 ):
     """
-    流式问答查询接口
-    
+    流式问答查询接口（Server-Sent Events 格式）
+
     Args:
         request: 查询请求
         username: 认证用户名
         agent: Agent 实例
         cache_manager: 缓存管理器
         model_manager: 模型管理器
-        
+
     Returns:
-        流式响应
+        SSE 格式的流式响应，每个 chunk 格式：
+        data: {"content": "...", "done": false}
+        data: {"content": "", "done": true, "context_ids": [...], "response_time": ...}
     """
-    def generate():
+    import json
+    import asyncio
+
+    async def generate():
+        """生成 SSE 格式的流式响应"""
+        start_time = time.time()
+
         try:
-            # 检查缓存（流式响应不支持缓存）
+            # 检查缓存
             if request.use_cache:
                 cached_result = cache_manager.get_cache(request.query)
                 if cached_result:
-                    # 对于缓存结果，直接返回完整答案
-                    yield f"data: {cached_result['answer']}\n\n"
+                    logger.info(f"缓存命中: {request.query[:50]}...")
+                    # 缓存命中，流式返回完整答案（模拟字符级流式）
+                    answer = cached_result['answer']
+                    for char in answer:
+                        chunk_data = {
+                            "content": char,
+                            "done": False
+                        }
+                        yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.01)  # 模拟打字效果
+
+                    # 发送结束标记
+                    final_chunk = {
+                        "content": "",
+                        "done": True,
+                        "context_ids": cached_result.get('context_ids', []),
+                        "response_time": time.time() - start_time,
+                        "model_type": cached_result.get('model_type', 'unknown'),
+                        "from_cache": True
+                    }
+                    yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
                     return
-            
+
             # 执行流式查询
-            # TODO: 实现流式查询逻辑
-            # 这里简化处理，实际应该使用模型的流式接口
-            result = agent.query(request.query, stream=True)
-            
-            if result.get("success"):
-                answer = result["answer"]
-                # 模拟流式输出（实际应该从模型流式接口获取）
-                words = answer.split()
-                for word in words:
-                    yield f"data: {word} \n\n"
-            else:
-                yield f"data: [错误] {result.get('error', '查询失败')}\n\n"
-        
+            async for chunk in agent.process_query_stream(request.query):
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+                # 如果是最后一个 chunk，保存到缓存
+                if chunk.get("done"):
+                    if request.use_cache:
+                        cache_manager.set_cache(
+                            query=request.query,
+                            answer=chunk.get("full_answer", ""),
+                            context_ids=chunk.get("context_ids", []),
+                            model_type=chunk.get("model_type", model_manager.get_current_model_type()),
+                            response_time=chunk.get("response_time", time.time() - start_time)
+                        )
+
+                    # 记录指标
+                    collector = get_metrics_collector()
+                    response_time = chunk.get("response_time", time.time() - start_time)
+                    collector.record_api_call("query_stream", response_time, success=True)
+
         except Exception as e:
             logger.error(f"流式查询失败: {e}")
-            yield f"data: [错误] {str(e)}\n\n"
-    
+            error_chunk = {
+                "content": "",
+                "done": True,
+                "error": str(e)
+            }
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+            # 记录失败指标
+            collector = get_metrics_collector()
+            collector.record_api_call("query_stream", time.time() - start_time, success=False)
+
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
