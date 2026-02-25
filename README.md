@@ -123,7 +123,7 @@ DEEPSEEK_API_KEY=your_api_key
 API_PASSWORD=your_api_password
 ```
 
-### 3. 使用 Docker Compose 启动（推荐）
+### 4. 使用 Docker Compose 启动（推荐）
 
 ```bash
 # 启动所有服务
@@ -136,7 +136,7 @@ docker-compose logs -f
 docker-compose down
 ```
 
-### 4. 本地开发
+### 5. 本地开发
 
 **推荐使用 `uv` 进行依赖管理**（项目已配置 `uv.lock`）：
 
@@ -180,13 +180,13 @@ uvicorn api.main:app --reload
 streamlit run frontend/app.py
 ```
 
-### 5. 访问服务
+### 6. 访问服务
 
 - **API 文档**：http://localhost:8000/docs
 - **前端界面**：http://localhost:8501
 - **健康检查**：http://localhost:8000/health
 
-### 6. Web GUI 使用指南
+### 7. Web GUI 使用指南
 
 本系统提供功能丰富的 Streamlit 多页面 GUI，包含以下功能模块：
 
