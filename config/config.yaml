@@ -84,8 +84,19 @@ lightrag:
     
     文本内容：
     {text}
-    
+
     # TODO: 根据实际 LightRAG 的 prompt 格式要求调整上述 prompt
+
+  # BM25 关键词检索配置
+  bm25:
+    enabled: ${BM25_ENABLED:true}  # 是否启用 BM25 索引
+    index_dir: ${BM25_INDEX_DIR:./rag_storage/bm25}  # 索引文件存储目录
+    # BM25 参数
+    k1: ${BM25_K1:1.5}  # 控制词频饱和度 (1.2-2.0)
+    b: ${BM25_B:0.75}  # 控制文档长度归一化 (0.5-1.0)
+    epsilon: ${BM25_EPSILON:0.25}  # 下界归一化参数
+    # RRF (Reciprocal Rank Fusion) 参数
+    rrf_k: ${BM25_RRF_K:60}  # RRF 常数，用于融合向量检索和 BM25 结果
 
 # 模型配置
 models:

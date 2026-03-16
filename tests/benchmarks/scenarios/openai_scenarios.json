@@ -1,0 +1,141 @@
+{
+  "tool": "openai",
+  "tool_name": "OpenAI",
+  "scenarios": [
+    {
+      "scenario_id": "openai-deploy-001",
+      "category": "deployment",
+      "difficulty": "basic",
+      "title": "安装OpenAI Python库",
+      "description": "开发者需要安装OpenAI Python SDK",
+      "user_query": "如何安装OpenAI Python库？",
+      "expected_topics": ["pip install", "openai", "安装"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-002",
+      "category": "deployment",
+      "difficulty": "basic",
+      "title": "配置API密钥",
+      "description": "开发者需要配置OpenAI API密钥",
+      "user_query": "如何配置OpenAI API密钥？",
+      "expected_topics": ["API密钥", "环境变量", "OPENAI_API_KEY"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-003",
+      "category": "deployment",
+      "difficulty": "basic",
+      "title": "初始化OpenAI客户端",
+      "description": "开发者需要初始化OpenAI Python客户端",
+      "user_query": "如何在Python中初始化OpenAI客户端？",
+      "expected_topics": ["OpenAI", "客户端", "初始化"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-004",
+      "category": "deployment",
+      "difficulty": "intermediate",
+      "title": "配置超时和重试",
+      "description": "开发者需要配置API请求的超时和重试策略",
+      "user_query": "如何配置OpenAI API的超时和重试？",
+      "expected_topics": ["超时", "重试", "配置"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-005",
+      "category": "deployment",
+      "difficulty": "intermediate",
+      "title": "使用异步客户端",
+      "description": "开发者需要使用异步方式调用OpenAI API",
+      "user_query": "如何使用异步OpenAI客户端？",
+      "expected_topics": ["异步", "asyncio", "AsyncOpenAI"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-006",
+      "category": "deployment",
+      "difficulty": "intermediate",
+      "title": "配置代理设置",
+      "description": "开发者需要通过代理访问OpenAI API",
+      "user_query": "如何为OpenAI Python客户端配置代理？",
+      "expected_topics": ["代理", "httpx", "proxy"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-007",
+      "category": "deployment",
+      "difficulty": "advanced",
+      "title": "实现流式响应",
+      "description": "开发者需要实现Server-Sent Events流式响应",
+      "user_query": "如何实现OpenAI API的流式响应？",
+      "expected_topics": ["流式", "stream", "SSE"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-008",
+      "category": "deployment",
+      "difficulty": "advanced",
+      "title": "配置结构化输出",
+      "description": "开发者需要使用JSON Schema确保输出格式",
+      "user_query": "如何配置OpenAI API返回结构化JSON输出？",
+      "expected_topics": ["JSON Schema", "结构化输出", "response_format"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "openai-deploy-009",
+      "category": "deployment",
+      "difficulty": "advanced",
+      "title": "实现函数调用",
+      "description": "开发者需要实现Function Calling功能",
+      "user_query": "如何在OpenAI API中实现函数调用？",
+      "expected_topics": ["函数调用", "tools", "function calling"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    }
+  ]
+}

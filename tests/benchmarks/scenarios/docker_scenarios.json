@@ -1,0 +1,141 @@
+{
+  "tool": "docker",
+  "tool_name": "Docker",
+  "scenarios": [
+    {
+      "scenario_id": "docker-api-001",
+      "category": "api_usage",
+      "difficulty": "basic",
+      "title": "Docker Engine API连接和认证",
+      "description": "开发者需要通过API连接到Docker Engine",
+      "user_query": "如何连接和认证Docker Engine API？",
+      "expected_topics": ["Docker Daemon", "Socket", "TLS认证"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-002",
+      "category": "api_usage",
+      "difficulty": "basic",
+      "title": "列出和管理容器",
+      "description": "开发者需要通过API列出运行中的容器",
+      "user_query": "如何使用Docker API列出和管理容器？",
+      "expected_topics": ["容器列表", "API调用", "容器状态"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "docker-api-003",
+      "category": "api_usage",
+      "difficulty": "basic",
+      "title": "拉取和推送镜像",
+      "description": "开发者需要通过API管理Docker镜像",
+      "user_query": "如何使用Docker API拉取和推送镜像？",
+      "expected_topics": ["镜像", "Registry", "API"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-004",
+      "category": "api_usage",
+      "difficulty": "intermediate",
+      "title": "使用Python SDK管理容器",
+      "description": "开发者需要用Python脚本自动化容器管理",
+      "user_query": "如何使用Python SDK管理Docker容器生命周期？",
+      "expected_topics": ["docker-py", "容器", "Python"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-005",
+      "category": "api_usage",
+      "difficulty": "intermediate",
+      "title": "构建镜像并推送到Registry",
+      "description": "开发者需要通过API构建自定义镜像",
+      "user_query": "如何使用Docker API构建镜像并推送到Registry？",
+      "expected_topics": ["镜像构建", "Dockerfile", "Registry"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-006",
+      "category": "api_usage",
+      "difficulty": "intermediate",
+      "title": "创建和管理网络",
+      "description": "开发者需要通过API创建自定义Docker网络",
+      "user_query": "如何使用Docker API创建和管理容器网络？",
+      "expected_topics": ["网络", "Bridge", "Overlay"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-007",
+      "category": "api_usage",
+      "difficulty": "advanced",
+      "title": "实现自定义Docker插件",
+      "description": "开发者需要扩展Docker功能",
+      "user_query": "如何开发和注册Docker插件？",
+      "expected_topics": ["插件", "API扩展", "授权"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-008",
+      "category": "api_usage",
+      "difficulty": "advanced",
+      "title": "监控容器资源使用",
+      "description": "开发者需要实时监控容器的CPU和内存使用情况",
+      "user_query": "如何使用Docker API获取容器的资源使用统计？",
+      "expected_topics": ["Stats", "监控", "资源限制"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "docker-api-009",
+      "category": "api_usage",
+      "difficulty": "advanced",
+      "title": "实现服务发现机制",
+      "description": "开发者需要在多容器环境中实现服务发现",
+      "user_query": "如何使用Docker API实现容器间的服务发现？",
+      "expected_topics": ["服务发现", "DNS", "负载均衡"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    }
+  ]
+}

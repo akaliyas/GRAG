@@ -69,12 +69,46 @@ samples/
 
 # 本地缓存与生成产物（应忽略）
 .cursor/
+.claude/
 artifacts/
+# 缓存与本地数据目录
+rag_storage/
+data/
+frontend/storage/
+
+# 本地/环境相关（不提交）
+.streamlit/
+config/presets/local.yaml
+LightRAG/
+nul
 
 # 本地/临时文档（如有）
 docs/*_draft.md
 docs/*_local.md
 docs/*-tmp.md
+
+# 前端对话历史（session 等 json）
+frontend/sessions/
+
+# 脚本与本地工具（不跟踪本地/环境脚本与 json 数据目录）
+json/
+scripts/configure_opencode_glm.ps1
+scripts/setup_nodejs_path.ps1
+scripts/verify_environment.ps1
+scripts/test_streaming.py
+start-claude.ps1
+
+# 测试文件（忽略一般测试，但保留 benchmark）
+tests/
+!tests/benchmarks/
+!tests/run_*.py
+!tests/BENCHMARKS.md
+
+# 开发用文档（保留 README 等解释性文档，不跟踪内部开发文档）
+AGENTS.md
+QUICK_CHECK.md
+PROJECT_STRUCTURE.md
+docs/
 
 # 配置文件（如果包含敏感信息）
 # config/config.yaml  # 如果需要忽略，取消注释

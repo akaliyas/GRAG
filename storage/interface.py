@@ -202,9 +202,13 @@ class IKnowledgeStorage(ABC):
         pass
 
     @abstractmethod
-    def list_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
         列出所有文档
+
+        Args:
+            limit: 返回数量限制
+            offset: 偏移量
 
         Returns:
             文档列表，每个包含 doc_id, title, source, created_at 等

@@ -1,0 +1,141 @@
+{
+  "tool": "kubernetes",
+  "tool_name": "Kubernetes",
+  "scenarios": [
+    {
+      "scenario_id": "k8s-deploy-001",
+      "category": "deployment",
+      "difficulty": "basic",
+      "title": "创建Nginx Deployment",
+      "description": "用户需要在Kubernetes集群中部署一个简单的Nginx应用",
+      "user_query": "如何在Kubernetes中部署Nginx应用？",
+      "expected_topics": ["Deployment", "kubectl apply", "容器镜像"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-002",
+      "category": "deployment",
+      "difficulty": "basic",
+      "title": "创建Service暴露应用",
+      "description": "用户创建的Deployment需要通过Service暴露给外部访问",
+      "user_query": "如何创建Service来暴露Kubernetes中的应用？",
+      "expected_topics": ["Service", "端口", "类型"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-003",
+      "category": "deployment",
+      "difficulty": "basic",
+      "title": "使用ConfigMap配置应用",
+      "description": "用户需要将配置信息传递给应用，而不需要重新构建镜像",
+      "user_query": "如何使用ConfigMap在Kubernetes中配置应用？",
+      "expected_topics": ["ConfigMap", "环境变量", "配置文件"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-004",
+      "category": "deployment",
+      "difficulty": "intermediate",
+      "title": "配置HPA实现自动扩缩容",
+      "description": "用户的应用需要根据CPU使用率自动扩展Pod数量",
+      "user_query": "如何配置Horizontal Pod Autoscaler实现应用自动扩缩容？",
+      "expected_topics": ["HPA", "CPU", "自动扩缩容"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-005",
+      "category": "deployment",
+      "difficulty": "intermediate",
+      "title": "配置Ingress路由规则",
+      "description": "用户需要配置Ingress来实现基于域名的路由",
+      "user_query": "如何配置Kubernetes Ingress实现HTTP路由？",
+      "expected_topics": ["Ingress", "路由", "域名"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-006",
+      "category": "deployment",
+      "difficulty": "intermediate",
+      "title": "使用PersistentVolume存储数据",
+      "description": "用户的有状态应用需要持久化存储",
+      "user_query": "如何为Kubernetes应用配置持久化存储？",
+      "expected_topics": ["PersistentVolume", "PersistentVolumeClaim", "存储"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-007",
+      "category": "deployment",
+      "difficulty": "advanced",
+      "title": "配置StatefulSet部署有状态应用",
+      "description": "用户需要部署一个需要稳定网络标识和持久化存储的数据库",
+      "user_query": "如何使用StatefulSet在Kubernetes中部署有状态应用？",
+      "expected_topics": ["StatefulSet", "稳定标识", "有序部署"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-008",
+      "category": "deployment",
+      "difficulty": "advanced",
+      "title": "配置DaemonSet在所有节点运行",
+      "description": "用户需要在集群的每个节点上运行日志收集代理",
+      "user_query": "如何使用DaemonSet确保Pod在每个节点上运行？",
+      "expected_topics": ["DaemonSet", "节点", "日志收集"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-deploy-009",
+      "category": "deployment",
+      "difficulty": "advanced",
+      "title": "创建和使用Helm Chart",
+      "description": "用户需要打包复杂的Kubernetes应用为Chart以便复用",
+      "user_query": "如何创建Helm Chart来管理复杂的Kubernetes应用？",
+      "expected_topics": ["Helm", "Chart", "模板化"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    }
+  ]
+}

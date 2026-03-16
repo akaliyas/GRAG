@@ -20,6 +20,7 @@ from models.model_manager import ModelManager
 from knowledge.lightrag_wrapper import LightRAGWrapper
 from utils.monitoring import track_performance
 from agent.tools.github_ingestor import GitHubIngestor
+from utils.citation import build_citation_prompt, post_process_answer
 
 logger = logging.getLogger(__name__)
 
@@ -283,10 +284,10 @@ class GRAGAgent:
     def _retrieve(self, state: AgentState) -> AgentState:
         """
         检索节点
-        
+
         Args:
             state: 当前状态
-            
+
         Returns:
             更新后的状态
         """
@@ -295,14 +296,15 @@ class GRAGAgent:
             if not query:
                 state["error"] = "查询文本为空"
                 return state
-            
+
             # 使用 LightRAG 进行检索（LightRAG 已经基于上下文生成了答案）
             result = self.lightrag.query(query, mode="hybrid", top_k=5)
-            
+
             # 保存检索结果
             state["context_ids"] = result.get("context_ids", [])
             state["documents"] = result.get("contexts", [])
-            
+            state["context_metadata"] = result.get("context_metadata", [])  # 新增：元数据
+
             # LightRAG 已经生成了答案，直接使用
             # 如果答案为空，则在 generate_answer 节点中基于上下文重新生成
             answer = result.get("answer", "")
@@ -314,40 +316,71 @@ class GRAGAgent:
         except Exception as e:
             logger.error(f"检索失败: {e}")
             state["error"] = str(e)
-        
+
         return state
     
     @track_performance("generate_answer")
     def _generate_answer(self, state: AgentState) -> AgentState:
         """
         生成答案节点
-        
+
+        支持引用功能，使用 [1]、[2]、[3] 格式标注来源。
+
         Args:
             state: 当前状态
-            
+
         Returns:
             更新后的状态
         """
         try:
-            # 如果 LightRAG 已经生成了答案，直接使用
+            # 如果 LightRAG 已经生成了答案，应用后处理
             answer = state.get("answer", "")
+            context_metadata = state.get("context_metadata", [])
+
             if answer:
-                logger.info("使用 LightRAG 生成的答案")
+                logger.info("使用 LightRAG 生成的答案，应用后处理")
+
+                # 后处理：验证和修复引用
+                if context_metadata:
+                    result = post_process_answer(
+                        answer,
+                        context_metadata,
+                        format_type="number",
+                        enable_fix=True
+                    )
+
+                    state["answer"] = result["fixed_answer"]
+                    state["citations"] = result.get("citations", [])
+                    state["citation_info"] = {
+                        "has_citations": result["has_citations"],
+                        "citation_count": result["citation_count"],
+                        "was_fixed": result["was_fixed"]
+                    }
+
                 return state
-            
+
             # 如果答案为空，基于上下文重新生成
             query = state.get("query", "")
             contexts = state.get("documents", [])
-            
-            if not contexts:
+
+            if not contexts and not context_metadata:
                 # 如果没有上下文，生成一个提示性答案
                 state["answer"] = "抱歉，我没有找到相关的上下文信息来回答这个问题。请尝试使用更具体的关键词，或者确保知识库中已包含相关信息。"
                 logger.warning("没有上下文信息，返回提示性答案")
                 return state
-            
-            # 构建 prompt
-            context_text = "\n\n".join(contexts[:5])  # 取前 5 个上下文
-            prompt = f"""
+
+            # 优先使用 context_metadata（包含完整元数据）
+            if context_metadata:
+                # 使用新的引用 prompt
+                prompt = build_citation_prompt(
+                    context_metadata,
+                    query,
+                    format_type="number"
+                )
+            else:
+                # 降级到旧的简单 prompt
+                context_text = "\n\n".join(contexts[:5])
+                prompt = f"""
 基于以下上下文回答用户问题。如果上下文中没有相关信息，请说明。
 
 上下文：
@@ -357,21 +390,39 @@ class GRAGAgent:
 
 答案：
 """
-            
+
             response = self.model_manager.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=2000
             )
-            
+
             answer = response.choices[0].message.content
-            state["answer"] = answer
-            
+
+            # 后处理：验证和修复引用
+            if context_metadata:
+                result = post_process_answer(
+                    answer,
+                    context_metadata,
+                    format_type="number",
+                    enable_fix=True
+                )
+
+                state["answer"] = result["fixed_answer"]
+                state["citations"] = result.get("citations", [])
+                state["citation_info"] = {
+                    "has_citations": result["has_citations"],
+                    "citation_count": result["citation_count"],
+                    "was_fixed": result["was_fixed"]
+                }
+            else:
+                state["answer"] = answer
+
             logger.info("答案生成完成（基于上下文）")
         except Exception as e:
             logger.error(f"生成答案失败: {e}")
             state["error"] = str(e)
-        
+
         return state
     
     async def process_query_stream(

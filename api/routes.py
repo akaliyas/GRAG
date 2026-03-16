@@ -67,6 +67,10 @@ class QueryResponse(BaseModel):
     model_type: str
     from_cache: bool = False
     error: Optional[str] = None
+    # 引用相关字段
+    citations: list = []  # 引用列表
+    citation_info: Optional[dict] = None  # 引用统计信息
+    context_metadata: list = []  # 完整的上下文元数据
 
 
 class FeedbackRequest(BaseModel):
@@ -145,7 +149,7 @@ def query(
             )
         
         response_time = time.time() - start_time
-        
+
         # 保存到缓存
         if request.use_cache:
             cache_manager.set_cache(
@@ -155,18 +159,21 @@ def query(
                 model_type=model_manager.get_current_model_type(),
                 response_time=response_time
             )
-        
+
         # 记录指标
         collector = get_metrics_collector()
         collector.record_api_call("query", response_time, success=True)
-        
+
         return QueryResponse(
             success=True,
             answer=result["answer"],
             context_ids=result.get("context_ids", []),
             response_time=response_time,
             model_type=model_manager.get_current_model_type(),
-            from_cache=False
+            from_cache=False,
+            citations=result.get("citations", []),
+            citation_info=result.get("citation_info"),
+            context_metadata=result.get("context_metadata", [])
         )
     
     except Exception as e:
@@ -351,6 +358,286 @@ def switch_model(
             current_model=model_manager.get_current_model_type(),
             message=f"模型切换失败: {str(e)}"
         )
+
+
+# ==================== 知识图谱和统计 API ====================
+
+@router.get("/graph/stats")
+@track_performance("api_graph_stats")
+def get_graph_stats(
+    username: str = Depends(verify_credentials)
+):
+    """
+    获取知识图谱统计信息
+
+    Returns:
+        图统计信息，包含实体数、关系数、密度等
+    """
+    try:
+        from storage.factory import create_storage_factory
+
+        storage_factory = create_storage_factory()
+        graph_storage = storage_factory.create_graph_storage()
+
+        if graph_storage is None:
+            return {
+                "success": False,
+                "message": "图存储未配置"
+            }
+
+        stats = graph_storage.get_graph_stats()
+        return {
+            "success": True,
+            "data": stats
+        }
+    except Exception as e:
+        logger.error(f"获取图统计失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取图统计失败: {str(e)}"
+        }
+
+
+@router.get("/graph/entities")
+@track_performance("api_graph_entities")
+def get_entities(
+    limit: int = 100,
+    offset: int = 0,
+    keyword: str = None,
+    username: str = Depends(verify_credentials)
+):
+    """
+    获取实体列表
+
+    Args:
+        limit: 返回数量限制
+        offset: 偏移量
+        keyword: 搜索关键词（可选）
+
+    Returns:
+        实体列表
+    """
+    try:
+        from storage.factory import create_storage_factory
+
+        storage_factory = create_storage_factory()
+        graph_storage = storage_factory.create_graph_storage()
+
+        if graph_storage is None:
+            return {
+                "success": False,
+                "message": "图存储未配置",
+                "entities": []
+            }
+
+        entities = graph_storage.get_entities(limit=limit, offset=offset)
+
+        # 如果提供了关键词，进行过滤
+        if keyword:
+            keyword_lower = keyword.lower()
+            entities = [
+                e for e in entities
+                if keyword_lower in e.get("entity_name", "").lower()
+                or keyword_lower in e.get("description", "").lower()
+            ]
+
+        return {
+            "success": True,
+            "entities": entities,
+            "count": len(entities)
+        }
+    except Exception as e:
+        logger.error(f"获取实体列表失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取实体列表失败: {str(e)}",
+            "entities": []
+        }
+
+
+@router.get("/graph/relationships")
+@track_performance("api_graph_relationships")
+def get_relationships(
+    limit: int = 100,
+    offset: int = 0,
+    username: str = Depends(verify_credentials)
+):
+    """
+    获取关系列表
+
+    Args:
+        limit: 返回数量限制
+        offset: 偏移量
+
+    Returns:
+        关系列表
+    """
+    try:
+        from storage.factory import create_storage_factory
+
+        storage_factory = create_storage_factory()
+        graph_storage = storage_factory.create_graph_storage()
+
+        if graph_storage is None:
+            return {
+                "success": False,
+                "message": "图存储未配置",
+                "relationships": []
+            }
+
+        relationships = graph_storage.get_relationships(limit=limit, offset=offset)
+
+        return {
+            "success": True,
+            "relationships": relationships,
+            "count": len(relationships)
+        }
+    except Exception as e:
+        logger.error(f"获取关系列表失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取关系列表失败: {str(e)}",
+            "relationships": []
+        }
+
+
+@router.get("/graph/export")
+@track_performance("api_graph_export")
+def export_graph(
+    format: str = "json",
+    username: str = Depends(verify_credentials)
+):
+    """
+    导出图数据（用于可视化）
+
+    Args:
+        format: 导出格式（json/gml）
+
+    Returns:
+        图数据
+    """
+    try:
+        from storage.factory import create_storage_factory
+
+        storage_factory = create_storage_factory()
+        graph_storage = storage_factory.create_graph_storage()
+
+        if graph_storage is None:
+            return {
+                "success": False,
+                "message": "图存储未配置"
+            }
+
+        if format == "json":
+            data = graph_storage.export_graph_json()
+        elif format == "gml":
+            data = {"gml": graph_storage.export_graph_gml()}
+        else:
+            return {
+                "success": False,
+                "message": f"不支持的格式: {format}"
+            }
+
+        return {
+            "success": True,
+            "format": format,
+            "data": data
+        }
+    except Exception as e:
+        logger.error(f"导出图数据失败: {e}")
+        return {
+            "success": False,
+            "message": f"导出图数据失败: {str(e)}"
+        }
+
+
+@router.get("/knowledge/stats")
+@track_performance("api_knowledge_stats")
+def get_knowledge_stats(
+    username: str = Depends(verify_credentials)
+):
+    """
+    获取知识库综合统计信息
+
+    Returns:
+        知识库统计信息
+    """
+    try:
+        from storage.factory import create_storage_factory
+
+        storage_factory = create_storage_factory()
+        knowledge_storage = storage_factory.create_knowledge_storage()
+
+        if knowledge_storage is None:
+            return {
+                "success": False,
+                "message": "知识库存储未配置"
+            }
+
+        stats = knowledge_storage.get_knowledge_stats()
+
+        return {
+            "success": True,
+            "data": stats
+        }
+    except Exception as e:
+        logger.error(f"获取知识库统计失败: {e}")
+        return {
+            "success": False,
+            "message": f"获取知识库统计失败: {str(e)}"
+        }
+
+
+@router.get("/knowledge/documents")
+@track_performance("api_knowledge_documents")
+def list_documents(
+    limit: int = 100,
+    offset: int = 0,
+    keyword: str = None,
+    username: str = Depends(verify_credentials)
+):
+    """
+    列出知识库中的文档
+
+    Args:
+        limit: 返回数量限制
+        offset: 偏移量
+        keyword: 搜索关键词（可选）
+
+    Returns:
+        文档列表
+    """
+    try:
+        from storage.factory import create_storage_factory
+
+        storage_factory = create_storage_factory()
+        knowledge_storage = storage_factory.create_knowledge_storage()
+
+        if knowledge_storage is None:
+            return {
+                "success": False,
+                "message": "知识库存储未配置",
+                "documents": []
+            }
+
+        # 如果有关键词，使用搜索功能
+        if keyword:
+            documents = knowledge_storage.search_documents(keyword, limit=limit)
+        else:
+            documents = knowledge_storage.list_documents(limit=limit, offset=offset)
+
+        return {
+            "success": True,
+            "documents": documents,
+            "count": len(documents)
+        }
+    except Exception as e:
+        logger.error(f"列出文档失败: {e}")
+        return {
+            "success": False,
+            "message": f"列出文档失败: {str(e)}",
+            "documents": []
+        }
 
 
 @router.get("/stats")

@@ -65,6 +65,7 @@ except ImportError:
 from config.config_manager import get_config
 from models.model_manager import ModelManager
 from utils.schema import CleanBatch, CleanDoc
+from knowledge.bm25_indexer import BM25Indexer, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,13 @@ class LightRAGWrapper:
         embedding_func = self._create_embedding_func(lightrag_config, config)
         
         # 获取存储配置
-        storage_type = lightrag_config.get('storage_type', 'postgresql')
+        # 支持环境变量强制使用JSON模式（用于测试和演示）
+        storage_type = os.environ.get('STORAGE_MODE', lightrag_config.get('storage_type', 'postgresql'))
+
+        # 如果环境变量设置为json，强制使用JSON存储
+        if storage_type.lower() == 'json':
+            storage_type = 'json'
+
         db_config = config.get_database_config()
         
         # 设置环境变量（LightRAG 通过环境变量读取数据库配置）
@@ -152,37 +159,53 @@ class LightRAGWrapper:
             workspace=lightrag_config.get('workspace', '')
         )
         
-        # 对于 PostgreSQL 或 Neo4j 存储，需要显式初始化数据库连接
-        if storage_type in ['postgresql', 'neo4j']:
-            try:
-                # 在 Jupyter 环境中，使用 nest_asyncio 或新线程
-                if _is_jupyter():
-                    if _jupyter_nest_asyncio_enabled:
-                        # nest_asyncio 已启用，可以直接使用
-                        loop = asyncio.get_event_loop()
-                        loop.run_until_complete(self.rag.initialize_storages())
-                    else:
-                        # 在新线程中运行异步初始化
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(
-                                lambda: asyncio.run(self.rag.initialize_storages())
-                            )
-                            future.result()
+        # 对于所有存储类型，都需要显式初始化存储
+        try:
+            # 在 Jupyter 环境中，使用 nest_asyncio 或新线程
+            if _is_jupyter():
+                if _jupyter_nest_asyncio_enabled:
+                    # nest_asyncio 已启用，可以直接使用
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(self.rag.initialize_storages())
                 else:
-                    # 非 Jupyter 环境，直接使用 asyncio.run
-                    asyncio.run(self.rag.initialize_storages())
-                logger.info("✅ PostgreSQL 数据库连接已初始化")
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"❌ PostgreSQL 数据库初始化失败: {error_msg}")
-                if "connection" in error_msg.lower() or "connect" in error_msg.lower():
-                    logger.error("💡 提示: 请检查 PostgreSQL 服务是否运行，以及数据库配置是否正确")
-                    logger.error(f"💡 提示: 检查数据库连接 - Host: {db_config.get('host')}, Port: {db_config.get('port')}, Database: {db_config.get('database')}")
-                raise RuntimeError(f"数据库初始化失败: {error_msg}") from e
+                    # 在新线程中运行异步初始化
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(
+                            lambda: asyncio.run(self.rag.initialize_storages())
+                        )
+                        future.result()
+            else:
+                # 非 Jupyter 环境，直接使用 asyncio.run
+                asyncio.run(self.rag.initialize_storages())
+            logger.info(f"✅ 存储已初始化，类型: {storage_type}")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ 存储初始化失败: {error_msg}")
+            if storage_type in ['postgresql', 'neo4j'] and ("connection" in error_msg.lower() or "connect" in error_msg.lower()):
+                logger.error("💡 提示: 请检查数据库服务是否运行，以及配置是否正确")
+                if storage_type == 'postgresql':
+                    logger.error(f"💡 提示: PostgreSQL - Host: {db_config.get('host')}, Port: {db_config.get('port')}, Database: {db_config.get('database')}")
+                else:
+                    logger.error("💡 提示: Neo4j - 请检查Neo4j服务是否运行")
+            raise RuntimeError(f"存储初始化失败: {error_msg}") from e
         
         # 存储存储类型（供外部访问）
         self.storage_type = storage_type
+
+        # 初始化 BM25 索引器
+        bm25_config = lightrag_config.get('bm25', {})
+        if bm25_config.get('enabled', False):
+            self.bm25_indexer = BM25Indexer(
+                index_dir=bm25_config.get('index_dir', './rag_storage/bm25'),
+                k1=bm25_config.get('k1', 1.5),
+                b=bm25_config.get('b', 0.75),
+                epsilon=bm25_config.get('epsilon', 0.25)
+            )
+            logger.info("BM25 索引器已启用")
+        else:
+            self.bm25_indexer = None
+            logger.info("BM25 索引器未启用")
 
         logger.info(f"LightRAG 已初始化，存储类型: {storage_type}")
         logger.info(f"  KV存储: {kv_storage}, 向量存储: {vector_storage}, 图存储: {graph_storage}")
@@ -634,11 +657,19 @@ class LightRAGWrapper:
             logger.info("开始更新 Metadata...")
             updated_count = self._update_metadata_batch(metadata_list)
             logger.info(f"✅ 成功更新 {updated_count}/{len(metadata_list)} 个文档的 Metadata")
-            
+
+            # Step 3: BM25 索引 - 如果启用，添加文档到 BM25 索引
+            if self.bm25_indexer:
+                logger.info("开始更新 BM25 索引...")
+                bm25_count = self.bm25_indexer.add_documents(metadata_list)
+                self.bm25_indexer.save_index()
+                logger.info(f"✅ 成功添加 {bm25_count} 个文档到 BM25 索引")
+
             return {
                 'success': True,
                 'total_documents': len(texts),
                 'metadata_updated': updated_count,
+                'bm25_indexed': len(metadata_list) if self.bm25_indexer else 0,
                 'source_url': batch.source_url,
                 'cleaned_at': batch.cleaned_at.isoformat() if batch.cleaned_at else None
             }
@@ -865,97 +896,269 @@ class LightRAGWrapper:
     def query(
         self,
         query: str,
-        mode: str = "hybrid",  # "global", "local", "hybrid"
+        mode: str = "hybrid",  # "global", "local", "hybrid", "hybrid_bm25"
         top_k: int = 5
     ) -> Dict[str, Any]:
         """
         查询知识库
-        
+
+        支持 hybrid_bm25 模式，融合向量检索和 BM25 关键词检索。
+
         Args:
             query: 查询文本
-            mode: 检索模式（global/local/hybrid）
+            mode: 检索模式（global/local/hybrid/hybrid_bm25）
             top_k: 返回的 top-k 结果数
-            
+
         Returns:
             查询结果字典，包含 answer, contexts, entities 等
         """
         try:
-            # 构建查询参数
-            query_param = QueryParam(
-                mode=mode,
-                top_k=top_k
-            )
-            
-            # 1. 获取答案（使用 query 方法）
-            answer_result = self.rag.query(query, query_param)
-            
-            # LightRAG.query() 返回 str 或 Iterator[str]，不是字典
-            # 需要统一处理为字符串答案
-            if answer_result is None:
-                answer = ""
-            elif isinstance(answer_result, str):
-                answer = answer_result
-            else:
-                # 如果是迭代器，收集所有内容
-                answer = "".join(answer_result) if hasattr(answer_result, '__iter__') else str(answer_result)
-            
-            # 2. 获取上下文数据（使用 query_data 方法）
-            try:
-                data_result = self.rag.query_data(query, query_param)
-                
-                # 提取上下文信息
-                contexts = []
-                context_ids = []
-                entities = []
-                relations = []
-                
-                if data_result.get("status") == "success":
-                    data = data_result.get("data", {})
-                    
-                    # 提取 chunks（文档片段）
-                    chunks = data.get("chunks", [])
-                    for chunk in chunks:
-                        content = chunk.get("content", "")
-                        chunk_id = chunk.get("chunk_id", "")
-                        if content:
-                            contexts.append(content)
-                        if chunk_id:
-                            context_ids.append(chunk_id)
-                    
-                    # 提取 entities（实体）
-                    entities_list = data.get("entities", [])
-                    for entity in entities_list:
-                        entity_name = entity.get("entity_name", "")
-                        if entity_name:
-                            entities.append(entity_name)
-                    
-                    # 提取 relationships（关系）
-                    relationships = data.get("relationships", [])
-                    for rel in relationships:
-                        rel_desc = rel.get("description", "")
-                        if rel_desc:
-                            relations.append(rel_desc)
-                
-                logger.info(f"检索到 {len(contexts)} 个上下文片段, {len(entities)} 个实体, {len(relations)} 个关系")
-                
-            except Exception as e:
-                logger.warning(f"获取上下文数据失败（不影响答案生成）: {e}")
-                contexts = []
-                context_ids = []
-                entities = []
-                relations = []
-            
-            # 格式化返回结果
-            return {
-                'answer': answer,
-                'contexts': contexts,
-                'entities': entities,
-                'relations': relations,
-                'context_ids': context_ids
-            }
+            # hybrid_bm25 模式：混合检索
+            if mode == "hybrid_bm25" and self.bm25_indexer:
+                return self._query_hybrid_bm25(query, top_k)
+
+            # 其他模式：使用 LightRAG 原生查询
+            return self._query_lightrag(query, mode, top_k)
+
         except Exception as e:
             logger.error(f"查询失败: {e}")
             raise
+
+    def _query_lightrag(
+        self,
+        query: str,
+        mode: str,
+        top_k: int
+    ) -> Dict[str, Any]:
+        """
+        LightRAG 原生查询
+
+        Args:
+            query: 查询文本
+            mode: 检索模式（global/local/hybrid）
+            top_k: 返回的 top-k 结果数
+
+        Returns:
+            查询结果字典
+        """
+        # 构建查询参数
+        query_param = QueryParam(
+            mode=mode,
+            top_k=top_k
+        )
+
+        # 1. 获取答案（使用 query 方法）
+        answer_result = self.rag.query(query, query_param)
+
+        # LightRAG.query() 返回 str 或 Iterator[str]，不是字典
+        # 需要统一处理为字符串答案
+        if answer_result is None:
+            answer = ""
+        elif isinstance(answer_result, str):
+            answer = answer_result
+        else:
+            # 如果是迭代器，收集所有内容
+            answer = "".join(answer_result) if hasattr(answer_result, '__iter__') else str(answer_result)
+
+        # 2. 获取上下文数据（使用 query_data 方法）
+        try:
+            data_result = self.rag.query_data(query, query_param)
+
+            # 提取上下文信息
+            contexts = []
+            context_ids = []
+            context_metadata = []  # 新增：完整元数据
+            entities = []
+            relations = []
+
+            if data_result.get("status") == "success":
+                data = data_result.get("data", {})
+
+                # 提取 chunks（文档片段）
+                chunks = data.get("chunks", [])
+                for idx, chunk in enumerate(chunks, start=1):
+                    content = chunk.get("content", "")
+                    chunk_id = chunk.get("chunk_id", "")
+
+                    if content:
+                        contexts.append(content)
+
+                        # 保存完整元数据
+                        context_metadata.append({
+                            'index': idx,  # 引用编号
+                            'chunk_id': chunk_id,
+                            'content': content,
+                            'source': {
+                                'file_path': chunk.get('file_path', ''),
+                                'source_url': chunk.get('source_url', ''),
+                                'doc_id': chunk.get('doc_id', ''),
+                                'title': chunk.get('title', '')
+                            }
+                        })
+
+                    if chunk_id:
+                        context_ids.append(chunk_id)
+
+                # 提取 entities（实体）
+                entities_list = data.get("entities", [])
+                for entity in entities_list:
+                    entity_name = entity.get("entity_name", "")
+                    if entity_name:
+                        entities.append(entity_name)
+
+                # 提取 relationships（关系）
+                relationships = data.get("relationships", [])
+                for rel in relationships:
+                    rel_desc = rel.get("description", "")
+                    if rel_desc:
+                        relations.append(rel_desc)
+
+            logger.info(f"检索到 {len(contexts)} 个上下文片段, {len(entities)} 个实体, {len(relations)} 个关系")
+
+        except Exception as e:
+            logger.warning(f"获取上下文数据失败（不影响答案生成）: {e}")
+            contexts = []
+            context_ids = []
+            context_metadata = []
+            entities = []
+            relations = []
+
+        # 格式化返回结果
+        return {
+            'answer': answer,
+            'contexts': contexts,
+            'context_metadata': context_metadata,  # 新增
+            'entities': entities,
+            'relations': relations,
+            'context_ids': context_ids,
+            'retrieval_mode': mode
+        }
+
+    def _query_hybrid_bm25(
+        self,
+        query: str,
+        top_k: int
+    ) -> Dict[str, Any]:
+        """
+        混合检索：融合 LightRAG 向量检索和 BM25 关键词检索
+
+        使用 RRF (Reciprocal Rank Fusion) 算法融合两种检索结果。
+
+        Args:
+            query: 查询文本
+            top_k: 返回的 top-k 结果数
+
+        Returns:
+            查询结果字典
+        """
+        config = get_config()
+        lightrag_config = config.get_lightrag_config()
+        bm25_config = lightrag_config.get('bm25', {})
+        rrf_k = bm25_config.get('rrf_k', 60)
+
+        logger.info(f"使用混合检索模式 (Vector + BM25), RRF_K={rrf_k}")
+
+        # 1. 并行执行两种检索
+        # LightRAG 向量检索
+        query_param = QueryParam(mode="hybrid", top_k=top_k * 2)  # 获取更多候选
+
+        # 获取答案
+        answer_result = self.rag.query(query, query_param)
+        if answer_result is None:
+            answer = ""
+        elif isinstance(answer_result, str):
+            answer = answer_result
+        else:
+            answer = "".join(answer_result) if hasattr(answer_result, '__iter__') else str(answer_result)
+
+        # 获取上下文数据（用于向量检索结果）
+        try:
+            data_result = self.rag.query_data(query, query_param)
+
+            vector_results = []
+            if data_result.get("status") == "success":
+                data = data_result.get("data", {})
+                chunks = data.get("chunks", [])
+                for idx, chunk in enumerate(chunks):
+                    vector_results.append({
+                        'doc_id': chunk.get("chunk_id", f"vec_{idx}"),
+                        'score': 1.0 / (idx + 1),  # 简单的排名分数
+                        'content': chunk.get("content", ""),
+                        'source': 'vector',
+                        'file_path': chunk.get('file_path', ''),
+                        'source_url': chunk.get('source_url', ''),
+                        'doc_id_meta': chunk.get('doc_id', ''),
+                        'title': chunk.get('title', '')
+                    })
+
+                entities = [e.get("entity_name", "") for e in data.get("entities", []) if e.get("entity_name")]
+                relations = [r.get("description", "") for r in data.get("relationships", []) if r.get("description")]
+            else:
+                vector_results = []
+                entities = []
+                relations = []
+
+        except Exception as e:
+            logger.warning(f"获取向量检索上下文失败: {e}")
+            vector_results = []
+            entities = []
+            relations = []
+
+        # BM25 关键词检索
+        bm25_results = self.bm25_indexer.search(query, top_k=top_k * 2)
+        for result in bm25_results:
+            result['source'] = 'bm25'
+
+        # 2. RRF 融合
+        fused_results = reciprocal_rank_fusion(
+            [vector_results, bm25_results],
+            k=rrf_k
+        )
+
+        # 3. 提取 top-k 结果
+        top_results = fused_results[:top_k]
+
+        # 4. 构建上下文和元数据
+        contexts = [r['content'] for r in top_results if r.get('content')]
+        context_ids = [r['doc_id'] for r in top_results if r.get('doc_id')]
+
+        # 构建完整元数据
+        context_metadata = []
+        for idx, r in enumerate(top_results, start=1):
+            context_metadata.append({
+                'index': idx,
+                'chunk_id': r.get('doc_id', ''),
+                'content': r.get('content', ''),
+                'source': {
+                    'file_path': r.get('file_path', r.get('metadata', {}).get('file_path', '')),
+                    'source_url': r.get('source_url', r.get('metadata', {}).get('source_url', '')),
+                    'doc_id': r.get('doc_id_meta', r.get('metadata', {}).get('doc_id', '')),
+                    'title': r.get('title', r.get('metadata', {}).get('title', ''))
+                },
+                'retrieval_info': {
+                    'method': r.get('source', 'unknown'),
+                    'score': r.get('score', 0.0)
+                }
+            })
+
+        logger.info(f"混合检索完成 - 向量: {len(vector_results)}, BM25: {len(bm25_results)}, 融合: {len(top_results)}")
+
+        # 格式化返回结果
+        return {
+            'answer': answer,
+            'contexts': contexts,
+            'context_metadata': context_metadata,  # 新增
+            'entities': entities,
+            'relations': relations,
+            'context_ids': context_ids,
+            'retrieval_mode': 'hybrid_bm25',
+            'retrieval_details': {
+                'vector_count': len(vector_results),
+                'bm25_count': len(bm25_results),
+                'fused_count': len(top_results),
+                'rrf_k': rrf_k
+            }
+        }
     
     def get_entity_context(self, entity_name: str) -> List[Dict[str, Any]]:
         """

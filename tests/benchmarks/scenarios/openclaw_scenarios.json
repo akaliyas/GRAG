@@ -1,0 +1,141 @@
+{
+  "tool": "openclaw",
+  "tool_name": "OpenClaw",
+  "scenarios": [
+    {
+      "scenario_id": "claw-trouble-001",
+      "category": "troubleshooting",
+      "difficulty": "basic",
+      "title": "容器启动失败排查",
+      "description": "用户的容器启动后立即退出",
+      "user_query": "容器启动后立即退出，如何排查问题？",
+      "expected_topics": ["日志", "退出码", "命令"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-002",
+      "category": "troubleshooting",
+      "difficulty": "basic",
+      "title": "镜像构建失败",
+      "description": "用户在构建镜像时遇到错误",
+      "user_query": "Docker镜像构建失败，如何查看详细错误信息？",
+      "expected_topics": ["构建日志", "Dockerfile", "调试"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-003",
+      "category": "troubleshooting",
+      "difficulty": "basic",
+      "title": "网络连接问题",
+      "description": "容器无法访问外部网络",
+      "user_query": "容器无法连接外部网络，如何排查网络配置？",
+      "expected_topics": ["网络", "DNS", "防火墙"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-004",
+      "category": "troubleshooting",
+      "difficulty": "intermediate",
+      "title": "内存溢出问题",
+      "description": "容器因内存不足被系统杀死",
+      "user_query": "容器频繁因OOM被杀死，如何分析和解决？",
+      "expected_topics": ["OOM", "内存限制", "优化"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-005",
+      "category": "troubleshooting",
+      "difficulty": "intermediate",
+      "title": "磁盘空间不足",
+      "description": "Docker占用了过多磁盘空间",
+      "user_query": "如何清理Docker占用的磁盘空间？",
+      "expected_topics": ["清理", "镜像", "卷"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-006",
+      "category": "troubleshooting",
+      "difficulty": "intermediate",
+      "title": "性能瓶颈分析",
+      "description": "应用在容器中运行缓慢",
+      "user_query": "如何分析容器中应用的性能瓶颈？",
+      "expected_topics": ["性能", "监控", "调优"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-007",
+      "category": "troubleshooting",
+      "difficulty": "advanced",
+      "title": "跨节点通信问题",
+      "description": "分布式应用节点间无法通信",
+      "user_query": "如何排查跨主机容器间的通信问题？",
+      "expected_topics": ["Overlay网络", "端口", "防火墙"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-008",
+      "category": "troubleshooting",
+      "difficulty": "advanced",
+      "title": "数据持久化问题",
+      "description": "容器重启后数据丢失",
+      "user_query": "如何确保容器重启后数据不丢失？",
+      "expected_topics": ["卷", "持久化", "备份"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "claw-trouble-009",
+      "category": "troubleshooting",
+      "difficulty": "advanced",
+      "title": "集群健康检查",
+      "description": "整个集群出现异常",
+      "user_query": "如何诊断和修复OpenClaw集群的健康问题？",
+      "expected_topics": ["健康检查", "日志", "恢复"],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    }
+  ]
+}
