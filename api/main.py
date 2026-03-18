@@ -15,6 +15,10 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 配置UTF-8编码（解决Windows中文乱码）
+from utils.encoding import ensure_utf8_encoding
+ensure_utf8_encoding()
+
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

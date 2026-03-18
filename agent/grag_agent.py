@@ -44,7 +44,10 @@ if TypedDict:
         github_repo_urls: List[str]  # GitHub 仓库 URL 列表
         documents: List[str]  # 文档列表
         context_ids: List[str]  # 检索到的上下文 ID
+        context_metadata: List[Dict[str, Any]]  # 上下文元数据（包含引用信息）
         answer: str  # 生成的答案
+        citations: List[str]  # 引用列表
+        citation_info: Dict[str, Any]  # 引用信息
         error: Optional[str]  # 错误信息
 else:
     AgentState = Dict[str, Any]
@@ -201,21 +204,17 @@ class GRAGAgent:
     def _route_after_retrieve(self, state: AgentState) -> str:
         """
         根据检索结果路由到下一个节点
-        
+
         Args:
             state: 当前状态
-            
+
         Returns:
             下一个节点名称
         """
         if state.get("error"):
             return "end"
-        
-        # 如果 LightRAG 已经生成了答案，直接结束
-        if state.get("answer"):
-            return "end"
-        
-        # 如果没有答案，进入生成答案节点
+
+        # 总是进入 generate_answer 节点（无论是后处理 LightRAG 答案还是生成新答案）
         return "generate_answer"
     
     @track_performance("github_ingest_tool")
@@ -435,6 +434,11 @@ class GRAGAgent:
 
         真正的流式响应：检索完成后，实时流式传输 LLM 生成的每个 token。
 
+        改进：
+        - 移除字符模拟，全部使用真正的 token 级流式
+        - 引用验证在流式完成后异步处理
+        - 移除人工延迟，优化性能
+
         Args:
             query: 查询文本
             use_cache: 是否使用缓存
@@ -450,49 +454,21 @@ class GRAGAgent:
         start_time = time.time()
 
         try:
-            # Step 1: 检索阶段（非流式）
-            # 直接调用 LightRAG 进行检索
+            # Step 1: 检索阶段（非流式，必须先获取上下文）
             result = self.lightrag.query(query, mode="hybrid", top_k=5)
 
             context_ids = result.get("context_ids", [])
             contexts = result.get("contexts", [])
+            context_metadata = result.get("context_metadata", [])
 
-            # Step 2: 流式生成答案
-            # 如果 LightRAG 已返回答案，流式发送
-            light_rag_answer = result.get("answer", "")
-
-            if light_rag_answer:
-                # LightRAG 已生成答案，流式发送
-                full_answer = ""
-                for char in light_rag_answer:
-                    full_answer += char
-                    yield {
-                        "content": char,
-                        "done": False
-                    }
-                    await asyncio.sleep(0.005)  # 轻微延迟模拟打字效果
-
-                # 发送结束标记
-                response_time = time.time() - start_time
-                yield {
-                    "content": "",
-                    "done": True,
-                    "full_answer": full_answer,
-                    "context_ids": context_ids,
-                    "response_time": response_time,
-                    "model_type": self.model_manager.get_current_model_type(),
-                    "from_cache": False,
-                    "intent": "query"
-                }
-                return
-
-            # Step 3: 如果没有上下文，返回提示
+            # Step 2: 检查是否有上下文
             if not contexts:
                 response_time = time.time() - start_time
+                error_msg = "抱歉，我没有找到相关的上下文信息来回答这个问题。请尝试使用更具体的关键词，或者确保知识库中已包含相关信息。"
                 yield {
-                    "content": "抱歉，我没有找到相关的上下文信息来回答这个问题。请尝试使用更具体的关键词，或者确保知识库中已包含相关信息。",
+                    "content": error_msg,
                     "done": True,
-                    "full_answer": "抱歉，我没有找到相关的上下文信息来回答这个问题。",
+                    "full_answer": error_msg,
                     "context_ids": [],
                     "response_time": response_time,
                     "model_type": self.model_manager.get_current_model_type(),
@@ -501,10 +477,19 @@ class GRAGAgent:
                 }
                 return
 
-            # Step 4: 基于上下文流式生成答案
-            # 构建 prompt
-            context_text = "\n\n".join(contexts[:5])
-            prompt = f"""基于以下上下文回答用户问题。如果上下文中没有相关信息，请说明。
+            # Step 3: 构建流式生成 prompt（优先使用引用格式）
+            if context_metadata:
+                # 使用引用 prompt
+                from utils.citation import build_citation_prompt
+                prompt = build_citation_prompt(
+                    context_metadata,
+                    query,
+                    format_type="number"
+                )
+            else:
+                # 降级到简单 prompt
+                context_text = "\n\n".join(contexts[:5])
+                prompt = f"""基于以下上下文回答用户问题。如果上下文中没有相关信息，请说明。
 
 上下文：
 {context_text}
@@ -513,7 +498,7 @@ class GRAGAgent:
 
 答案："""
 
-            # 使用流式 API 调用
+            # Step 4: 真正的 token 级流式生成
             full_answer = ""
             try:
                 # 调用流式 chat_completion
@@ -521,7 +506,7 @@ class GRAGAgent:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7,
                     max_tokens=2000,
-                    stream=True  # 启用流式
+                    stream=True  # 启用真正的流式
                 )
 
                 # 处理流式响应
@@ -538,7 +523,7 @@ class GRAGAgent:
 
             except Exception as stream_error:
                 logger.warning(f"流式生成失败，回退到非流式: {stream_error}")
-                # 回退到非流式
+                # 回退到非流式（一次性发送）
                 response = self.model_manager.chat_completion(
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7,
@@ -546,15 +531,40 @@ class GRAGAgent:
                     stream=False
                 )
                 full_answer = response.choices[0].message.content
-                # 流式发送完整答案
-                for char in full_answer:
-                    yield {
-                        "content": char,
-                        "done": False
-                    }
-                    await asyncio.sleep(0.005)
+                # 一次性发送（不再逐字符模拟）
+                yield {
+                    "content": full_answer,
+                    "done": False
+                }
 
-            # 发送结束标记
+            # Step 5: 流式完成后，异步处理引用验证
+            citations = []
+            citation_info = {}
+
+            if context_metadata:
+                try:
+                    from utils.citation import post_process_answer
+                    result = post_process_answer(
+                        full_answer,
+                        context_metadata,
+                        format_type="number",
+                        enable_fix=True
+                    )
+
+                    # 如果答案被修复，需要重新发送
+                    if result["was_fixed"]:
+                        logger.info("引用已修复，更新答案")
+
+                    citations = result.get("citations", [])
+                    citation_info = {
+                        "has_citations": result["has_citations"],
+                        "citation_count": result["citation_count"],
+                        "was_fixed": result["was_fixed"]
+                    }
+                except Exception as citation_error:
+                    logger.warning(f"引用处理失败（不影响答案）: {citation_error}")
+
+            # Step 6: 发送结束标记
             response_time = time.time() - start_time
             yield {
                 "content": "",
@@ -564,7 +574,9 @@ class GRAGAgent:
                 "response_time": response_time,
                 "model_type": self.model_manager.get_current_model_type(),
                 "from_cache": False,
-                "intent": "query"
+                "intent": "query",
+                "citations": citations,
+                "citation_info": citation_info
             }
 
         except Exception as e:
@@ -598,7 +610,10 @@ class GRAGAgent:
             "github_repo_urls": [],
             "documents": [],
             "context_ids": [],
+            "context_metadata": [],
             "answer": "",
+            "citations": [],
+            "citation_info": {},
             "error": None
         }
 
@@ -617,7 +632,9 @@ class GRAGAgent:
                 "success": True,
                 "answer": final_state.get("answer", ""),
                 "context_ids": final_state.get("context_ids", []),
-                "intent": final_state.get("intent", "")
+                "intent": final_state.get("intent", ""),
+                "citations": final_state.get("citations", []),
+                "citation_info": final_state.get("citation_info", {})
             }
         except Exception as e:
             logger.error(f"Agent 执行失败: {e}")

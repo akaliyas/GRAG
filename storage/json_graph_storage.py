@@ -33,13 +33,36 @@ class JSONGraphStorage(IGraphStorage):
         """
         self.data_dir = Path(data_dir)
         self.namespace = namespace
-        self._graphml_file = self.data_dir / f"graph_{namespace}.graphml"
+        # LightRAG 使用固定的文件名 graph_chunk_entity_relation.graphml
+        # 为了兼容性，我们尝试按优先级查找多个可能的文件名
+        self._graphml_file = self._find_graphml_file()
         self._graph: Optional[nx.Graph] = None
 
         logger.info(f"JSON 图存储初始化: {self._graphml_file}")
 
         # 加载图数据
         self._load_graph()
+
+    def _find_graphml_file(self) -> Path:
+        """
+        查找 GraphML 文件
+
+        按优先级查找：
+        1. graph_chunk_entity_relation.graphml (LightRAG 标准文件名)
+        2. graph_{namespace}.graphml (自定义命名空间)
+        """
+        # 优先使用 LightRAG 标准文件名
+        standard_file = self.data_dir / "graph_chunk_entity_relation.graphml"
+        if standard_file.exists():
+            return standard_file
+
+        # 回退到自定义命名空间文件名
+        custom_file = self.data_dir / f"graph_{namespace}.graphml"
+        if custom_file.exists():
+            return custom_file
+
+        # 默认返回标准文件名（即使不存在）
+        return standard_file
 
     def _load_graph(self) -> None:
         """从 GraphML 文件加载图数据"""

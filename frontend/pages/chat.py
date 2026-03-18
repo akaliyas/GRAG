@@ -293,138 +293,158 @@ def render_session_sidebar():
 
     显示所有历史会话，支持切换、创建、删除操作。
     """
-    with st.sidebar:
-        st.markdown("### 💬 我的对话")
+    try:
+        with st.sidebar:
+            st.markdown("### 💬 我的对话")
 
-        # 新建对话按钮 - 使用计数器防止重复点击
-        # 获取当前计数器值（作为唯一标识符）
-        current_counter = st.session_state.get("session_creation_counter", 0)
+            # 新建对话按钮 - 使用计数器防止重复点击
+            # 获取当前计数器值（作为唯一标识符）
+            current_counter = st.session_state.get("session_creation_counter", 0)
 
-        if st.button(
-            "➕ 新建对话",
-            use_container_width=True,
-            type="primary",
-            key=f"create_session_btn_{current_counter}",
-            disabled=st.session_state.get("creating_session", False)
-        ):
-            # 防止重复执行：检查是否已在创建中
-            if not st.session_state.get("creating_session", False):
-                # 标记开始创建
-                st.session_state.creating_session = True
+            if st.button(
+                "➕ 新建对话",
+                use_container_width=True,
+                type="primary",
+                key=f"create_session_btn_{current_counter}",
+                disabled=st.session_state.get("creating_session", False)
+            ):
+                # 防止重复执行：检查是否已在创建中
+                if not st.session_state.get("creating_session", False):
+                    # 标记开始创建
+                    st.session_state.creating_session = True
 
-                # 执行创建
-                success = create_new_session()
+                    # 执行创建
+                    success = create_new_session()
 
-                # 增加计数器，使按钮的 key 在下次 rerun 时改变
-                # 这会导致旧按钮的点击状态被清除，防止重复触发
-                st.session_state.session_creation_counter = current_counter + 1
+                    # 增加计数器，使按钮的 key 在下次 rerun 时改变
+                    # 这会导致旧按钮的点击状态被清除，防止重复触发
+                    st.session_state.session_creation_counter = current_counter + 1
 
-                # 重置创建标志
-                st.session_state.creating_session = False
+                    # 重置创建标志
+                    st.session_state.creating_session = False
 
-                # 刷新 UI
-                if success:
-                    st.rerun()
-                else:
-                    st.error("创建会话失败")
+                    # 刷新 UI
+                    if success:
+                        st.rerun()
+                    else:
+                        st.error("创建会话失败")
 
-        st.markdown("---")
+            st.markdown("---")
 
-        # 获取会话列表
-        sessions = session_manager.list_sessions()
-        current_session_id = st.session_state.get("current_session_id", "")
+            # 获取会话列表（带错误处理）
+            try:
+                sessions = session_manager.list_sessions()
+            except Exception as e:
+                logger.error(f"获取会话列表失败: {e}")
+                st.error(f"⚠️ 无法加载会话列表")
+                sessions = []
 
-        # 显示会话列表
-        if sessions:
-            st.markdown("#### 📚 历史对话")
+            current_session_id = st.session_state.get("current_session_id", "")
 
-            for idx, session in enumerate(sessions):
-                session_id = session.get("session_id", "")
-                title = session.get("title", "新对话")
-                updated_at = session.get("updated_at", "")
-                message_count = session.get("message_count", 0)
+            # 显示会话列表
+            if sessions:
+                st.markdown("#### 📚 历史对话")
 
-                # 检查是否是当前会话
-                is_current = (session_id == current_session_id)
+                for idx, session in enumerate(sessions):
+                    try:
+                        session_id = session.get("session_id", "")
+                        title = session.get("title", "新对话")
+                        updated_at = session.get("updated_at", "")
+                        message_count = session.get("message_count", 0)
 
-                # 格式化时间
-                time_str = format_timestamp(updated_at)
+                        # 检查是否是当前会话
+                        is_current = (session_id == current_session_id)
 
-                # 创建会话项
-                with st.container():
-                    # 使用 columns 布局：标题 + 删除按钮
-                    col_title, col_delete = st.columns([4, 1])
+                        # 格式化时间
+                        time_str = format_timestamp(updated_at)
 
-                    with col_title:
-                        # 会话标题和点击区域
-                        if is_current:
-                            st.markdown(f"**🔹 {title}**")
-                        else:
-                            # 使用 button 模拟可点击区域
-                            button_label = f"📝 {title}"
-                            if st.button(
-                                button_label,
-                                key=f"switch_{session_id}",
-                                help="点击切换到此对话"
-                            ):
-                                if switch_session(session_id):
-                                    st.rerun()
+                        # 创建会话项
+                        with st.container():
+                            # 使用 columns 布局：标题 + 删除按钮
+                            col_title, col_delete = st.columns([4, 1])
 
-                    with col_delete:
-                        # 删除按钮
-                        if not is_current:
-                            if st.button(
-                                "🗑️",
-                                key=f"delete_{session_id}",
-                                help="删除此对话",
-                                disabled=is_current
-                            ):
-                                delete_session_with_confirmation(session_id, title)
-                                st.rerun()
+                            with col_title:
+                                # 会话标题和点击区域
+                                if is_current:
+                                    st.markdown(f"**🔹 {title}**")
+                                else:
+                                    # 使用 button 模拟可点击区域
+                                    button_label = f"📝 {title}"
+                                    if st.button(
+                                        button_label,
+                                        key=f"switch_{session_id}",
+                                        help="点击切换到此对话"
+                                    ):
+                                        if switch_session(session_id):
+                                            st.rerun()
 
-                    # 显示元数据
-                    st.caption(
-                        f"🕒 {time_str} | 💬 {message_count} 条消息"
-                    )
+                            with col_delete:
+                                # 删除按钮
+                                if not is_current:
+                                    if st.button(
+                                        "🗑️",
+                                        key=f"delete_{session_id}",
+                                        help="删除此对话",
+                                        disabled=is_current
+                                    ):
+                                        delete_session_with_confirmation(session_id, title)
+                                        st.rerun()
 
-                    # 添加分隔线（最后一个会话不需要）
-                    if idx < len(sessions) - 1:
-                        st.markdown("---")
+                            # 显示元数据
+                            st.caption(
+                                f"🕒 {time_str} | 💬 {message_count} 条消息"
+                            )
 
-        else:
-            # 空状态
-            st.info("📭 暂无历史对话")
-            st.markdown("开始新的对话吧！")
+                            # 添加分隔线（最后一个会话不需要）
+                            if idx < len(sessions) - 1:
+                                st.markdown("---")
 
-        st.markdown("---")
+                    except Exception as e:
+                        logger.error(f"显示会话项 {idx} 失败: {e}")
+                        continue
 
-        # 导入/导出区域
-        st.markdown("#### 📦 数据管理")
+            else:
+                # 空状态
+                st.info("📭 暂无历史对话")
+                st.markdown("开始新的对话吧！")
 
-        col_import, col_export = st.columns(2)
+            st.markdown("---")
 
-        with col_export:
-            if st.button("📤 导出全部", use_container_width=True):
-                try:
-                    filename, content = export_all_sessions()
-                    st.download_button(
-                        label="下载",
-                        data=content,
-                        file_name=filename,
-                        mime="application/json",
-                        use_container_width=True
-                    )
-                except Exception as e:
-                    st.error(f"导出失败: {e}")
+            # 导入/导出区域
+            st.markdown("#### 📦 数据管理")
 
-        with col_import:
-            # 导入功能（预留接口）
-            if st.button("📥 导入", use_container_width=True):
-                st.info("导入功能开发中...")
+            col_import, col_export = st.columns(2)
 
-        # 侧边栏底部信息
-        st.markdown("---")
-        st.caption("💡 提示：对话会自动保存到浏览器")
+            with col_export:
+                if st.button("📤 导出全部", use_container_width=True):
+                    try:
+                        filename, content = export_all_sessions()
+                        st.download_button(
+                            label="下载",
+                            data=content,
+                            file_name=filename,
+                            mime="application/json",
+                            use_container_width=True
+                        )
+                    except Exception as e:
+                        logger.error(f"导出失败: {e}")
+                        st.error(f"导出失败: {e}")
+
+            with col_import:
+                # 导入功能（预留接口）
+                if st.button("📥 导入", use_container_width=True):
+                    st.info("导入功能开发中...")
+
+            # 侧边栏底部信息
+            st.markdown("---")
+            st.caption("💡 提示：对话会自动保存到浏览器")
+
+    except Exception as e:
+        logger.error(f"侧边栏渲染失败: {e}", exc_info=True)
+        with st.sidebar:
+            st.error("⚠️ 侧边栏加载出错")
+            if st.button("🔄 重试"):
+                st.rerun()
 
 
 def query_api_stream(query: str):
@@ -578,6 +598,47 @@ def show():
     # 主区域标题
     st.subheader("💬 智能对话")
 
+    # 紧急状态恢复按钮（当页面卡住时使用）
+    with st.expander("🔧 状态管理", expanded=False):
+        st.markdown("**如果页面出现问题，可以使用以下工具恢复：**")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button("🔄 刷新页面", use_container_width=True):
+                st.rerun()
+
+        with col2:
+            if st.button("🧹 清空当前对话", use_container_width=True):
+                st.session_state.chat_messages = []
+                save_current_session()
+                st.success("对话已清空")
+                st.rerun()
+
+        with col3:
+            if st.button("⚠️ 紧急重置", use_container_width=True):
+                # 保存当前会话数据
+                current_session_id = st.session_state.get("current_session_id")
+                current_messages = st.session_state.get("chat_messages", [])
+
+                # 重置所有状态
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+
+                # 恢复基本状态
+                st.session_state.chat_messages = current_messages
+                if current_session_id:
+                    st.session_state.current_session_id = current_session_id
+
+                # 重新初始化
+                init_session_state()
+                st.success("状态已重置")
+                st.rerun()
+
+        st.caption("💡 提示：刷新页面通常可以解决临时问题")
+
+    st.markdown("---")
+
     # 显示当前会话信息
     current_session_id = st.session_state.get("current_session_id", "")
     if current_session_id:
@@ -589,34 +650,106 @@ def show():
         if current_session:
             st.caption(f"📌 {current_session.get('title', '新对话')}")
 
-    # 显示聊天消息
+    # 显示聊天消息（带错误处理）
     for idx, message in enumerate(st.session_state.chat_messages):
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        try:
+            # 验证消息基本结构
+            if not isinstance(message, dict):
+                logger.error(f"消息 {idx} 不是字典类型: {type(message)}")
+                continue
 
-            # 显示反馈按钮（仅助手消息）
-            if message["role"] == "assistant" and message.get("query"):
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("👍 有帮助", key=f"thumb_up_{idx}"):
-                        submit_feedback(message["query"], True)
-                        st.success("感谢反馈！")
-                        st.rerun()
-                with col_btn2:
-                    if st.button("👎 无帮助", key=f"thumb_down_{idx}"):
-                        submit_feedback(message["query"], False)
-                        st.info("感谢反馈，我们会改进！")
-                        st.rerun()
+            if "role" not in message:
+                logger.error(f"消息 {idx} 缺少 role 字段")
+                continue
 
-                # 显示详细信息
-                with st.expander("📋 详细信息"):
-                    if "response_time" in message:
-                        st.write(f"**响应时间**: {message['response_time']:.2f} 秒")
-                    if "model_type" in message:
-                        st.write(f"**模型**: {message['model_type']}")
-                    if "from_cache" in message:
-                        cache_status = "是" if message['from_cache'] else "否"
-                        st.write(f"**来自缓存**: {cache_status}")
+            if "content" not in message:
+                logger.error(f"消息 {idx} 缺少 content 字段")
+                continue
+
+            # 安全显示消息
+            with st.chat_message(message["role"]):
+                # 安全显示内容
+                content = message.get("content", "")
+                if not isinstance(content, str):
+                    content = str(content)
+                st.markdown(content)
+
+                # 显示反馈按钮（仅助手消息）
+                if message["role"] == "assistant" and message.get("query"):
+                    try:
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("👍 有帮助", key=f"thumb_up_{idx}"):
+                                submit_feedback(message["query"], True)
+                                st.success("感谢反馈！")
+                                st.rerun()
+                        with col_btn2:
+                            if st.button("👎 无帮助", key=f"thumb_down_{idx}"):
+                                submit_feedback(message["query"], False)
+                                st.info("感谢反馈，我们会改进！")
+                                st.rerun()
+                    except Exception as e:
+                        logger.error(f"显示反馈按钮失败 (消息 {idx}): {e}")
+
+                # 显示详细信息（仅助手消息）
+                if message["role"] == "assistant":
+                    try:
+                        with st.expander("📋 详细信息"):
+                            if "response_time" in message:
+                                try:
+                                    response_time = float(message["response_time"])
+                                    st.write(f"**响应时间**: {response_time:.2f} 秒")
+                                except (ValueError, TypeError):
+                                    st.write(f"**响应时间**: {message.get('response_time', '未知')}")
+
+                            if "model_type" in message:
+                                st.write(f"**模型**: {message.get('model_type', 'unknown')}")
+
+                            if "from_cache" in message:
+                                cache_status = "是" if message.get("from_cache") else "否"
+                                st.write(f"**来自缓存**: {cache_status}")
+
+                            # 安全显示引用列表
+                            if "citations" in message:
+                                citations = message.get("citations", [])
+                                if citations and isinstance(citations, list):
+                                    st.write(f"**引用**: {len(citations)} 个")
+                                    for citation in citations:
+                                        try:
+                                            if isinstance(citation, str):
+                                                st.caption(citation)
+                                            elif isinstance(citation, dict):
+                                                # 兼容字典格式
+                                                source = citation.get('source', {})
+                                                if isinstance(source, dict):
+                                                    file_path = source.get('file_path', '未知来源')
+                                                else:
+                                                    file_path = '未知来源'
+                                                st.caption(f"• {file_path}")
+                                            else:
+                                                st.caption(f"• {str(citation)}")
+                                        except Exception as e:
+                                            logger.error(f"显示引用失败: {e}")
+                                            st.caption("• [引用格式错误]")
+
+                            # 安全显示引用统计
+                            if "citation_info" in message:
+                                citation_info = message.get("citation_info")
+                                if isinstance(citation_info, dict):
+                                    if citation_info.get("has_citations"):
+                                        citation_count = citation_info.get('citation_count', 0)
+                                        st.write(f"**引用统计**: {citation_count} 个引用")
+                                        if citation_info.get("was_fixed"):
+                                            st.info("引用已自动修复")
+                    except Exception as e:
+                        logger.error(f"显示详细信息失败 (消息 {idx}): {e}")
+                        st.caption("⚠️ 详细信息显示出错")
+
+        except Exception as e:
+            logger.error(f"显示消息 {idx} 时发生错误: {e}", exc_info=True)
+            # 显示错误提示，但不中断整个对话
+            st.error(f"⚠️ 消息 {idx + 1} 显示出错")
+            continue
 
     st.markdown("---")
 
@@ -625,90 +758,118 @@ def show():
 
     # 处理用户输入
     if prompt:
-        # 添加用户消息到对话历史
-        st.session_state.chat_messages.append({
-            "role": "user",
-            "content": prompt,
-            "timestamp": datetime.now().isoformat()
-        })
+        try:
+            # 添加用户消息到对话历史
+            st.session_state.chat_messages.append({
+                "role": "user",
+                "content": prompt,
+                "timestamp": datetime.now().isoformat()
+            })
 
-        # 流式输出助手回复
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
-            metadata = {}
+            # 流式输出助手回复
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                full_response = ""
+                metadata = {}
 
-            # 创建一个状态容器来控制加载状态
-            status_container = st.container()
-            with status_container:
-                status_placeholder = st.empty()
+                # 创建一个状态容器来控制加载状态
+                status_container = st.container()
+                with status_container:
+                    status_placeholder = st.empty()
 
-            # 显示初始加载状态
-            status_placeholder.info("正在思考...")
+                # 显示初始加载状态
+                status_placeholder.info("正在思考...")
 
-            # 流式处理响应
-            first_chunk = True
-            chunk_count = 0
-            MAX_CHUNKS = 10000  # 防止无限循环
+                # 流式处理响应
+                first_chunk = True
+                chunk_count = 0
+                MAX_CHUNKS = 10000  # 防止无限循环
 
-            for chunk in query_api_stream(prompt):
-                chunk_count += 1
-                if chunk_count > MAX_CHUNKS:
-                    full_response += "\n\n[错误: 响应过长，已中断]"
-                    logger.warning(f"响应超过最大块数限制 ({MAX_CHUNKS})，已中断")
+                try:
+                    for chunk in query_api_stream(prompt):
+                        chunk_count += 1
+                        if chunk_count > MAX_CHUNKS:
+                            full_response += "\n\n[错误: 响应过长，已中断]"
+                            logger.warning(f"响应超过最大块数限制 ({MAX_CHUNKS})，已中断")
+                            status_placeholder.empty()
+                            break
+
+                        # 清除加载状态（在第一个有效块时）
+                        if first_chunk and "content" in chunk:
+                            status_placeholder.empty()
+                            first_chunk = False
+
+                        # 处理错误
+                        if "error" in chunk:
+                            full_response = f"错误: {chunk['error']}"
+                            message_placeholder.error(full_response)
+                            status_placeholder.empty()
+                            break
+
+                        # 处理内容
+                        if "content" in chunk and chunk["content"]:
+                            full_response += chunk["content"]
+                            # 显示带光标的文本（打字效果）
+                            message_placeholder.markdown(full_response + "▌")
+
+                        # 处理结束标记
+                        if "done" in chunk and chunk["done"]:
+                            # 安全提取元数据（包含新的引用信息）
+                            try:
+                                metadata = {
+                                    "response_time": float(chunk.get("response_time", 0)),
+                                    "model_type": str(chunk.get("model_type", "unknown")),
+                                    "from_cache": bool(chunk.get("from_cache", False)),
+                                    "context_ids": list(chunk.get("context_ids", [])),
+                                    "intent": str(chunk.get("intent", "")),
+                                    "citations": list(chunk.get("citations", [])),
+                                    "citation_info": dict(chunk.get("citation_info", {}))
+                                }
+                            except Exception as e:
+                                logger.error(f"提取元数据失败: {e}")
+                                metadata = {}
+                            status_placeholder.empty()
+                            break
+
+                except Exception as stream_error:
+                    logger.error(f"流式处理出错: {stream_error}", exc_info=True)
+                    full_response += f"\n\n⚠️ 响应处理出错: {str(stream_error)}"
                     status_placeholder.empty()
-                    break
 
-                # 清除加载状态（在第一个有效块时）
-                if first_chunk and "content" in chunk:
-                    status_placeholder.empty()
-                    first_chunk = False
+                # 最终显示（去掉光标）
+                try:
+                    message_placeholder.markdown(full_response)
+                except Exception as display_error:
+                    logger.error(f"显示最终响应失败: {display_error}")
+                    message_placeholder.write(full_response)
 
-                # 处理错误
-                if "error" in chunk:
-                    full_response = f"错误: {chunk['error']}"
-                    message_placeholder.error(full_response)
-                    status_placeholder.empty()
-                    break
+            # 保存完整消息到对话历史
+            assistant_message = {
+                "role": "assistant",
+                "content": full_response,
+                "query": prompt,
+                "timestamp": datetime.now().isoformat()
+            }
 
-                # 处理内容
-                if "content" in chunk and chunk["content"]:
-                    full_response += chunk["content"]
-                    # 显示带光标的文本（打字效果）
-                    message_placeholder.markdown(full_response + "▌")
+            # 添加元数据（如果有）
+            if metadata:
+                assistant_message.update(metadata)
 
-                # 处理结束标记
-                if "done" in chunk and chunk["done"]:
-                    # 保存元数据
-                    metadata = {
-                        "response_time": chunk.get("response_time", 0),
-                        "model_type": chunk.get("model_type", "unknown"),
-                        "from_cache": chunk.get("from_cache", False),
-                        "context_ids": chunk.get("context_ids", []),
-                        "intent": chunk.get("intent", "")
-                    }
-                    status_placeholder.empty()
-                    break
+            st.session_state.chat_messages.append(assistant_message)
 
-            # 最终显示（去掉光标）
-            message_placeholder.markdown(full_response)
+            # 自动保存会话（持久化到浏览器存储）
+            try:
+                save_current_session()
+            except Exception as save_error:
+                logger.error(f"保存会话失败: {save_error}")
+                # 不中断用户体验，静默失败
 
-        # 保存完整消息到对话历史
-        assistant_message = {
-            "role": "assistant",
-            "content": full_response,
-            "query": prompt,
-            "timestamp": datetime.now().isoformat()
-        }
-
-        # 添加元数据（如果有）
-        if metadata:
-            assistant_message.update(metadata)
-
-        st.session_state.chat_messages.append(assistant_message)
-
-        # 自动保存会话（持久化到浏览器存储）
-        save_current_session()
+        except Exception as e:
+            logger.error(f"处理用户输入时发生错误: {e}", exc_info=True)
+            st.error(f"⚠️ 处理请求时出错: {str(e)}")
+            # 如果已经添加了用户消息，移除它（因为请求失败了）
+            if st.session_state.chat_messages and st.session_state.chat_messages[-1]["role"] == "user":
+                st.session_state.chat_messages.pop()
 
         # 注意：不要在这里调用 st.rerun()，否则会导致无限循环
         # Streamlit 的聊天界面会自动更新，无需手动刷新

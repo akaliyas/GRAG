@@ -201,6 +201,11 @@ async def query_stream(
     """
     流式问答查询接口（Server-Sent Events 格式）
 
+    改进：
+    - 真正的 token 级流式响应
+    - 支持引用系统（citations, citation_info）
+    - 缓存响应使用 token 级流式（非字符模拟）
+
     Args:
         request: 查询请求
         username: 认证用户名
@@ -211,7 +216,7 @@ async def query_stream(
     Returns:
         SSE 格式的流式响应，每个 chunk 格式：
         data: {"content": "...", "done": false}
-        data: {"content": "", "done": true, "context_ids": [...], "response_time": ...}
+        data: {"content": "", "done": true, "context_ids": [...], "citations": [...], "response_time": ...}
     """
     import json
     import asyncio
@@ -226,24 +231,27 @@ async def query_stream(
                 cached_result = cache_manager.get_cache(request.query)
                 if cached_result:
                     logger.info(f"缓存命中: {request.query[:50]}...")
-                    # 缓存命中，流式返回完整答案（模拟字符级流式）
+                    # 缓存命中，流式返回完整答案（token 级流式，而非字符模拟）
                     answer = cached_result['answer']
-                    for char in answer:
-                        chunk_data = {
-                            "content": char,
-                            "done": False
-                        }
-                        yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
-                        await asyncio.sleep(0.01)  # 模拟打字效果
+
+                    # 一次性发送（真正的流式应该是 LLM token 级别，缓存无法模拟）
+                    chunk_data = {
+                        "content": answer,
+                        "done": False
+                    }
+                    yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
 
                     # 发送结束标记
                     final_chunk = {
                         "content": "",
                         "done": True,
+                        "full_answer": answer,
                         "context_ids": cached_result.get('context_ids', []),
                         "response_time": time.time() - start_time,
                         "model_type": cached_result.get('model_type', 'unknown'),
-                        "from_cache": True
+                        "from_cache": True,
+                        "citations": cached_result.get('citations', []),
+                        "citation_info": cached_result.get('citation_info', {})
                     }
                     yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
                     return

@@ -94,12 +94,15 @@ class LightRAGWrapper:
         embedding_func = self._create_embedding_func(lightrag_config, config)
         
         # 获取存储配置
-        # 支持环境变量强制使用JSON模式（用于测试和演示）
-        storage_type = os.environ.get('STORAGE_MODE', lightrag_config.get('storage_type', 'postgresql'))
+        # 优先级：环境变量 > 配置文件 > 默认值
+        # 默认使用 'file' 模式（本地文件存储）
+        storage_type = os.environ.get('STORAGE_MODE',
+                         os.environ.get('LIGHTRAG_STORAGE_TYPE',
+                         lightrag_config.get('storage_type', 'file')))
 
-        # 如果环境变量设置为json，强制使用JSON存储
-        if storage_type.lower() == 'json':
-            storage_type = 'json'
+        # 统一处理：json 和 file 都表示本地文件存储
+        if storage_type.lower() in ['json', 'file']:
+            storage_type = 'file'
 
         db_config = config.get_database_config()
         

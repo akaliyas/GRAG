@@ -362,29 +362,26 @@ def reciprocal_rank_fusion(
             # RRF 公式: 1 / (k + rank)
             rrf_score = 1.0 / (k + rank)
 
-            if doc_id in rrf_scores:
-                rrf_scores[doc_id] += rrf_score
-            else:
-                rrf_scores[doc_id] = rrf_score
-
             # 保留第一个包含该 doc_id 的结果的完整信息
-            if 'content' not in rrf_scores.get(doc_id, {}):
+            if doc_id not in rrf_scores:
                 rrf_scores[doc_id] = {
                     'doc_id': doc_id,
                     'rrf_score': rrf_score,
                     'content': result.get('content', ''),
                     'metadata': result.get('metadata', {}),
-                    'original_scores': result.get('original_scores', [])
+                    'original_scores': [{
+                        'source': result.get('source', 'unknown'),
+                        'score': result.get('score', 0)
+                    }]
                 }
-                result.setdefault('original_scores', []).append({
-                    'source': result.get('source', 'unknown'),
-                    'score': result.get('score', 0)
-                })
             else:
                 # 累加 RRF 分数
                 rrf_scores[doc_id]['rrf_score'] += rrf_score
-                if 'original_scores' in result:
-                    rrf_scores[doc_id]['original_scores'].extend(result.get('original_scores', []))
+                # 添加原始分数信息
+                rrf_scores[doc_id]['original_scores'].append({
+                    'source': result.get('source', 'unknown'),
+                    'score': result.get('score', 0)
+                })
 
     # 按 RRF 分数排序
     sorted_results = sorted(

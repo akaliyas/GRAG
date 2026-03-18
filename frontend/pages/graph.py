@@ -157,14 +157,26 @@ def create_network_graph(entities: List[Dict], relationships: List[Dict], max_no
             description=entity.get("description", "")
         )
 
-    # 添加边
+    # 添加边（带类型安全保护）
     for rel in valid_relationships:
-        G.add_edge(
-            rel["source"],
-            rel["target"],
-            relation=rel.get("relation_type", "related"),
-            weight=rel.get("weight", 1.0)
-        )
+        try:
+            # 安全获取weight，确保是float类型
+            weight = rel.get("weight", 1.0)
+            if not isinstance(weight, (int, float)):
+                try:
+                    weight = float(weight)
+                except (ValueError, TypeError):
+                    weight = 1.0
+
+            G.add_edge(
+                rel["source"],
+                rel["target"],
+                relation=str(rel.get("relation_type", "related")),
+                weight=weight
+            )
+        except Exception as e:
+            logger.error(f"添加边失败: {e}")
+            continue
 
     # 计算布局
     try:
@@ -174,33 +186,55 @@ def create_network_graph(entities: List[Dict], relationships: List[Dict], max_no
         st.error("无法生成图布局")
         return
 
-    # 提取边和节点信息
+    # 提取边和节点信息（带错误处理）
     edge_x = []
     edge_y = []
     edge_text = []
 
-    for edge in G.edges(data=True):
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        edge_text.append(edge[2].get("relation", "related"))
+    try:
+        for edge in G.edges(data=True):
+            if edge[0] not in pos or edge[1] not in pos:
+                logger.warning(f"边 {edge} 的节点位置缺失，跳过")
+                continue
+            x0, y0 = pos[edge[0]]
+            x1, y1 = pos[edge[1]]
+            edge_x.extend([x0, x1, None])
+            edge_y.extend([y0, y1, None])
+            edge_text.append(str(edge[2].get("relation", "related")))
+    except Exception as e:
+        logger.error(f"处理边数据失败: {e}")
 
     node_x = []
     node_y = []
     node_text = []
     node_info = []
 
-    for node in G.nodes(data=True):
-        x, y = pos[node[0]]
-        node_x.append(x)
-        node_y.append(y)
-        node_text.append(node[1].get("label", node[0]))
-        node_info.append(
-            f"**{node[1].get('label')}**<br>"
-            f"类型: {node[1].get('type')}<br>"
-            f"描述: {node[1].get('description', 'N/A')[:100]}"
-        )
+    try:
+        for node in G.nodes(data=True):
+            if node[0] not in pos:
+                logger.warning(f"节点 {node[0]} 位置缺失，跳过")
+                continue
+            x, y = pos[node[0]]
+            node_x.append(x)
+            node_y.append(y)
+            node_text.append(str(node[1].get("label", node[0])))
+            description = node[1].get('description', '')
+            # 安全截断描述
+            if description and len(description) > 100:
+                description = description[:100] + "..."
+            node_info.append(
+                f"**{node[1].get('label', node[0])}**<br>"
+                f"类型: {node[1].get('type', 'unknown')}<br>"
+                f"描述: {description or 'N/A'}"
+            )
+    except Exception as e:
+        logger.error(f"处理节点数据失败: {e}")
+
+    # 检查是否有有效数据
+    if not node_x or not node_y:
+        st.warning("无法生成可视化：没有有效的节点数据")
+        logger.warning("节点数据为空，跳过可视化")
+        return
 
     # 创建边轨迹
     edge_trace = go.Scatter(
@@ -228,8 +262,10 @@ def create_network_graph(entities: List[Dict], relationships: List[Dict], max_no
     # 创建图
     fig = go.Figure(data=[edge_trace, node_trace],
                     layout=go.Layout(
-                        title='知识图谱可视化',
-                        titlefont_size=16,
+                        title=dict(
+                            text='知识图谱可视化',
+                            font=dict(size=16)
+                        ),
                         showlegend=False,
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
@@ -263,16 +299,32 @@ def show():
             st.error("无法加载图数据，请确认后端服务正在运行")
             return
 
-    # 显示统计信息
+    # 显示统计信息（带类型安全保护）
+    try:
+        entity_count = int(stats.get("entity_count", 0))
+        relation_count = int(stats.get("relation_count", 0))
+        # 安全处理density：转换为float，失败则使用0
+        try:
+            density = float(stats.get("density", 0))
+        except (ValueError, TypeError):
+            density = 0.0
+        is_connected = bool(stats.get("is_connected", False))
+    except Exception as e:
+        logger.error(f"解析统计数据失败: {e}")
+        entity_count = 0
+        relation_count = 0
+        density = 0.0
+        is_connected = False
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("实体数", stats.get("entity_count", 0))
+        st.metric("实体数", entity_count)
     with col2:
-        st.metric("关系数", stats.get("relation_count", 0))
+        st.metric("关系数", relation_count)
     with col3:
-        st.metric("图密度", f"{stats.get('density', 0):.3f}")
+        st.metric("图密度", f"{density:.3f}")
     with col4:
-        st.metric("连通性", "是" if stats.get("is_connected", False) else "否")
+        st.metric("连通性", "是" if is_connected else "否")
 
     st.markdown("---")
 
@@ -313,7 +365,7 @@ def show():
 
     with col2:
         if st.button("🔄 刷新数据", use_container_width=True):
-        st.rerun()
+            st.rerun()
 
     st.markdown("---")
 

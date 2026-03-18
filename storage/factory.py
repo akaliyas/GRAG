@@ -69,15 +69,25 @@ class StorageFactory:
 
     def _get_default_config(self, storage_type: str) -> Dict[str, Any]:
         """获取默认配置"""
+        # 检查部署模式
+        deployment_mode = os.environ.get('DEPLOYMENT_MODE', 'local')
+
         if storage_type == 'cache':
             return {
                 'backend': StorageBackend.JSON,
                 'cache_dir': './data/cache',
             }
         elif storage_type == 'graph':
-            return {
-                'backend': StorageBackend.NEO4J,
-            }
+            # 根据部署模式选择默认图存储
+            if deployment_mode == 'local':
+                return {
+                    'backend': StorageBackend.JSON,
+                    'data_dir': './rag_storage',
+                }
+            else:
+                return {
+                    'backend': StorageBackend.NEO4J,
+                }
         elif storage_type == 'knowledge':
             return {
                 'backend': StorageBackend.JSON,
