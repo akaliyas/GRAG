@@ -23,9 +23,10 @@
 - 支持 Docker Compose 一键部署，灵活适配不同运行环境。
 
 **知识构建**
-- Zero-Crawler策略：仅使用GitHub API，避免爬虫复杂性
-- 文件驱动管道：Fetch → Clean → Ingest 三步流程
+- Zero-Crawler策略：主要使用GitHub API，避免爬虫复杂性
+- 文件驱动管道：Fetch → Clean → [外部文档API增强] → Ingest
 - Pydantic数据契约：确保数据质量和可追溯性
+- 外部文档API集成（可选）：元数据增强、相关库发现、文档上下文补充
 
 **测试评估**
 - 真实场景基准测试：27个场景覆盖部署/API/故障排查
@@ -87,7 +88,8 @@ Agent层 (LangGraph) - 检索与答案生成
 - **检索增强**：BM25 (rank-bm25) + RRF融合
 - **数据库**：PostgreSQL / Neo4j / JSON文件
 - **模型**：DeepSeek API / Ollama / vLLM
-- **数据采集**：GitHub API
+- **数据采集**：GitHub API（主要）+ 外部文档API（补充）
+- **文档增强**：外部文档API（可选，用于元数据增强和相关库发现）
 - **部署**：Docker Compose
 - **包管理**：uv
 

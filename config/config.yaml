@@ -204,3 +204,20 @@ monitoring:
   track_api_calls: true
   track_response_time: true
 
+# Context7 配置（补充工具/脚手架）
+# 生态位定位：作为 utils 之一，提供辅助功能，不替代 GitHub API
+context7:
+  enabled: ${CONTEXT7_ENABLED:true}  # 是否启用 Context7 功能
+  api_key: ${CONTEXT7_API_KEY}  # Context7 API Key（从环境变量读取）
+  base_url: ${CONTEXT7_BASE_URL:https://context7.com/api}  # API 地址
+  timeout: ${CONTEXT7_TIMEOUT:30}  # 请求超时时间（秒）
+  # 功能开关
+  features:
+    library_search: true  # 库搜索功能（发现相关技术栈）
+    doc_context: true  # 文档上下文获取（补充时效性）
+    metadata_enhancement: true  # 元数据增强（为文档添加相关库链接）
+  # 限流配置
+  rate_limit:
+    max_requests_per_minute: 60  # 每分钟最大请求数
+    max_concurrent_requests: 5  # 最大并发请求数
+

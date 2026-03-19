@@ -210,6 +210,31 @@ class LightRAGWrapper:
             self.bm25_indexer = None
             logger.info("BM25 索引器未启用")
 
+        # 更新 LightRAG 的 addon_params，支持自定义 prompt
+        # 从 config.yaml 读取自定义 prompt 并注入到 LightRAG
+        custom_prompts = {}
+
+        # 读取 entity_extraction_prompt
+        entity_prompt = lightrag_config.get('entity_extraction_prompt', '')
+        if entity_prompt and isinstance(entity_prompt, str) and len(entity_prompt.strip()) > 100:
+            # 将 YAML 中的多行 prompt 转换为可用于替换内置 prompt 的格式
+            # 注意：我们需要保持 prompt 中的占位符格式与 LightRAG 内置一致
+            custom_prompts['entity_extraction_system_prompt'] = entity_prompt
+            logger.info("已加载自定义 entity_extraction_prompt")
+
+        # 读取 relation_extraction_prompt
+        relation_prompt = lightrag_config.get('relation_extraction_prompt', '')
+        if relation_prompt and isinstance(relation_prompt, str) and len(relation_prompt.strip()) > 100:
+            custom_prompts['relation_extraction_system_prompt'] = relation_prompt
+            logger.info("已加载自定义 relation_extraction_prompt")
+
+        # 将自定义 prompt 添加到 LightRAG 的 addon_params
+        if custom_prompts:
+            # LightRAG 在初始化后已经创建了 global_config，我们需要更新它
+            # 这需要在 LightRAG 的 operate 模块中使用
+            self.rag.addon_params.update(custom_prompts)
+            logger.info(f"已注入 {len(custom_prompts)} 个自定义 prompt 到 LightRAG")
+
         logger.info(f"LightRAG 已初始化，存储类型: {storage_type}")
         logger.info(f"  KV存储: {kv_storage}, 向量存储: {vector_storage}, 图存储: {graph_storage}")
         logger.info(f"  嵌入模型: {lightrag_config.get('embedding_model', 'unknown')}, "
