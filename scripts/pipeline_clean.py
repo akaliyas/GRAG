@@ -71,60 +71,76 @@ logger = logging.getLogger(__name__)
 def clean_document(raw_doc: RawDoc, ingestor) -> CleanDoc:
     """
     清洗单个文档
-    
+
     核心逻辑：
     1. Frontmatter 剥离：将 YAML Frontmatter 从内容中提取出来，存入 metadata
     2. HTML 标签清理：移除所有 HTML 标签
     3. Notebook 清理：移除 Notebook 输出，保留 Markdown 和 Code 输入
     4. 链接修复：修复相对链接为 GitHub Raw URL
-    
+
+    改进：添加清洗状态追踪（cleaning_status, cleaning_error）。
+
     Args:
         raw_doc: RawDoc 对象（包含原始内容）
         ingestor: GitHubIngestor 实例（复用，避免重复初始化）
-        
+
     Returns:
         CleanDoc 对象（清洗后的内容）
     """
     content = raw_doc.content
     original_length = len(content)
     cleaning_log = []
-    
-    # 步骤 1: Frontmatter 剥离（仅对 Markdown 文件）
-    frontmatter = {}
-    if raw_doc.file_type == 'markdown':
-        frontmatter, body_content = ingestor._extract_frontmatter(content)
+    cleaning_status = "success"
+    cleaning_error = None
+
+    try:
+        # 步骤 1: Frontmatter 剥离（仅对 Markdown 文件）
+        frontmatter = {}
+        if raw_doc.file_type == 'markdown':
+            frontmatter, body_content = ingestor._extract_frontmatter(content)
+            if frontmatter:
+                content = body_content
+                cleaning_log.append(f"剥离了 Frontmatter: {list(frontmatter.keys())}")
+
+        # 步骤 2: 根据文件类型应用清洗逻辑
+        if raw_doc.file_type == 'notebook':
+            # Notebook 清洗：移除输出，保留 Markdown 和 Code 输入
+            content = ingestor._clean_notebook(content, raw_doc.source_url or '')
+            cleaning_log.append("清洗了 Notebook（移除输出，保留 Markdown 和 Code 输入）")
+        elif raw_doc.file_type == 'markdown':
+            # Markdown 清洗：移除 HTML 标签，修复链接
+            content = ingestor._clean_html_tags(content)
+            content = ingestor._fix_relative_links(content, raw_doc.source_url or '')
+            cleaning_log.append("清理了 HTML 标签，修复了相对链接")
+        else:
+            # 其他文件类型：仅清理 HTML 标签
+            content = ingestor._clean_html_tags(content)
+            cleaning_log.append("清理了 HTML 标签")
+
+        # 步骤 3: 清理多余的空白行
+        import re
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
+        # 记录清洗统计
+        if len(content) != original_length:
+            cleaning_log.append(f"清理了空白行（{original_length} -> {len(content)} 字符）")
+
+        # 合并 metadata：原始 metadata + Frontmatter
+        enhanced_metadata = raw_doc.metadata.copy()
         if frontmatter:
-            content = body_content
-            cleaning_log.append(f"剥离了 Frontmatter: {list(frontmatter.keys())}")
-    
-    # 步骤 2: 根据文件类型应用清洗逻辑
-    if raw_doc.file_type == 'notebook':
-        # Notebook 清洗：移除输出，保留 Markdown 和 Code 输入
-        content = ingestor._clean_notebook(content, raw_doc.source_url or '')
-        cleaning_log.append("清洗了 Notebook（移除输出，保留 Markdown 和 Code 输入）")
-    elif raw_doc.file_type == 'markdown':
-        # Markdown 清洗：移除 HTML 标签，修复链接
-        content = ingestor._clean_html_tags(content)
-        content = ingestor._fix_relative_links(content, raw_doc.source_url or '')
-        cleaning_log.append("清理了 HTML 标签，修复了相对链接")
-    else:
-        # 其他文件类型：仅清理 HTML 标签
-        content = ingestor._clean_html_tags(content)
-        cleaning_log.append("清理了 HTML 标签")
-    
-    # 步骤 3: 清理多余的空白行
-    import re
-    content = re.sub(r'\n{3,}', '\n\n', content)
-    
-    # 记录清洗统计
-    if len(content) != original_length:
-        cleaning_log.append(f"清理了空白行（{original_length} -> {len(content)} 字符）")
-    
-    # 合并 metadata：原始 metadata + Frontmatter
-    enhanced_metadata = raw_doc.metadata.copy()
-    if frontmatter:
-        enhanced_metadata['frontmatter'] = frontmatter
-    
+            enhanced_metadata['frontmatter'] = frontmatter
+
+    except Exception as e:
+        # 清洗失败，记录错误
+        cleaning_status = "failed"
+        cleaning_error = str(e)
+        cleaning_log.append(f"清洗失败: {cleaning_error}")
+        logger.error(f"清洗文档失败 ({raw_doc.path}): {e}")
+
+        # 使用原始内容
+        content = raw_doc.content
+        enhanced_metadata = raw_doc.metadata.copy()
+
     return CleanDoc(
         doc_id=raw_doc.doc_id,  # 继承 doc_id，确保幂等性
         content=content,  # 清洗后的内容（Frontmatter 已剥离）
@@ -132,7 +148,9 @@ def clean_document(raw_doc: RawDoc, ingestor) -> CleanDoc:
         file_path=raw_doc.path,  # 继承 file_path
         file_type=raw_doc.file_type,  # 继承 file_type
         metadata=enhanced_metadata,  # 增强后的 metadata（包含 Frontmatter）
-        cleaning_log=cleaning_log  # 清洗日志
+        cleaning_log=cleaning_log,  # 清洗日志
+        cleaning_status=cleaning_status,  # 清洗状态
+        cleaning_error=cleaning_error  # 清洗错误信息
     )
 
 
@@ -178,49 +196,37 @@ def main():
     logger.info("开始清洗文档...")
     logger.info("  清洗步骤：1. Frontmatter 剥离 2. HTML 标签清理 3. Notebook 清理 4. 链接修复")
     clean_docs = []
-    
+
     for i, raw_doc in enumerate(raw_batch.docs, 1):
-        try:
-            clean_doc = clean_document(raw_doc, ingestor)
-            clean_docs.append(clean_doc)
-            
-            if (i % 10 == 0) or (i == len(raw_batch.docs)):
-                logger.info(f"  已处理 {i}/{len(raw_batch.docs)} 个文档")
-                if clean_doc.cleaning_log:
-                    logger.debug(f"    清洗日志: {', '.join(clean_doc.cleaning_log)}")
-        except Exception as e:
-            logger.warning(f"清洗文档失败 ({raw_doc.path}): {e}")
-            import traceback
-            traceback.print_exc()
-            # 即使清洗失败，也保留原始内容（但标记为失败）
-            clean_docs.append(CleanDoc(
-                doc_id=raw_doc.doc_id,
-                content=raw_doc.content,  # 保留原始内容
-                source_url=raw_doc.source_url or '',
-                file_path=raw_doc.path,
-                file_type=raw_doc.file_type,
-                metadata=raw_doc.metadata,
-                cleaning_log=[f"清洗失败: {str(e)}"]
-            ))
-    
+        clean_doc = clean_document(raw_doc, ingestor)
+        clean_docs.append(clean_doc)
+
+        if (i % 10 == 0) or (i == len(raw_batch.docs)):
+            logger.info(f"  已处理 {i}/{len(raw_batch.docs)} 个文档")
+            if clean_doc.cleaning_log:
+                logger.debug(f"    清洗日志: {', '.join(clean_doc.cleaning_log)}")
+
     # 创建 CleanBatch
     clean_batch = CleanBatch(
         source_url=raw_batch.repo_url,  # 使用 repo_url 字段
         docs=clean_docs,
         raw_batch_path=str(input_path)
     )
-    
+
     # 保存到文件
     output_path = Path(args.output)
     clean_batch.save_to_file(str(output_path))
-    
+
     logger.info(f"✅ 已保存到: {output_path}")
     logger.info(f"   文件大小: {output_path.stat().st_size / 1024:.2f} KB")
-    
+
     # 打印统计信息
     total_chars = sum(len(doc.content) for doc in clean_docs)
+    failed_count = sum(1 for doc in clean_docs if doc.cleaning_status == "failed")
     logger.info("\n📊 统计信息:")
     logger.info(f"  总文档数: {len(clean_docs)}")
+    logger.info(f"  成功: {len(clean_docs) - failed_count}")
+    logger.info(f"  失败: {failed_count}")
     logger.info(f"  总字符数: {total_chars:,}")
     
     logger.info("\n✅ Step 2 (Clean) 完成！")
