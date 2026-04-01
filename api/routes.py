@@ -1,19 +1,29 @@
 """
 FastAPI 路由模块
 RESTful 风格 API
+
+改进：使用统一协议层（utils.schema）管理所有数据契约。
 """
 import time
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from api.auth import verify_credentials
 from agent.grag_agent import GRAGAgent
 from storage.cache_manager import CacheManager
 from models.model_manager import ModelManager
 from utils.monitoring import get_metrics_collector, track_performance
+# 使用统一协议层
+from utils.schema import (
+    QueryRequest,
+    QueryResponse,
+    FeedbackRequest,
+    FeedbackResponse,
+    ModelSwitchRequest,
+    ModelSwitchResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,53 +58,6 @@ def get_model_manager() -> ModelManager:
     if _model_manager is None:
         raise HTTPException(status_code=500, detail="模型管理器未初始化")
     return _model_manager
-
-
-# 请求/响应模型
-class QueryRequest(BaseModel):
-    """查询请求"""
-    query: str
-    use_cache: bool = True
-    stream: bool = False
-
-
-class QueryResponse(BaseModel):
-    """查询响应"""
-    success: bool
-    answer: str
-    context_ids: list = []
-    response_time: float
-    model_type: str
-    from_cache: bool = False
-    error: Optional[str] = None
-    # 引用相关字段
-    citations: list = []  # 引用列表
-    citation_info: Optional[dict] = None  # 引用统计信息
-    context_metadata: list = []  # 完整的上下文元数据
-
-
-class FeedbackRequest(BaseModel):
-    """反馈请求"""
-    query: str
-    is_positive: bool  # True 为正面反馈，False 为负面反馈
-
-
-class FeedbackResponse(BaseModel):
-    """反馈响应"""
-    success: bool
-    message: str
-
-
-class ModelSwitchRequest(BaseModel):
-    """模型切换请求"""
-    model_type: str  # "api" 或 "local"（local 暂时禁用）
-
-
-class ModelSwitchResponse(BaseModel):
-    """模型切换响应"""
-    success: bool
-    current_model: str
-    message: str
 
 
 @router.post("/query", response_model=QueryResponse)
