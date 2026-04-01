@@ -1,42 +1,44 @@
 """
 GRAG Agent 层
 使用 LangGraph 实现意图识别、工具调用、数据预处理、检索和回答
+
+改进：使用统一协议层（utils.schema）管理 Agent 状态。
 """
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Annotated
+from operator import add
 from enum import Enum
 
 try:
     from langgraph.graph import StateGraph, END
     from langgraph.prebuilt import ToolNode
-    from typing_extensions import TypedDict, Annotated
+    from typing_extensions import TypedDict
 except ImportError:
     StateGraph = None
     ToolNode = None
     TypedDict = None
-    Annotated = None
 
 from models.model_manager import ModelManager
 from knowledge.lightrag_wrapper import LightRAGWrapper
 from utils.monitoring import track_performance
 from agent.tools.github_ingestor import GitHubIngestor
 from utils.citation import build_citation_prompt, post_process_answer
+# 使用统一协议层
+from utils.schema import IntentType, AgentState as PydanticAgentState
 
 logger = logging.getLogger(__name__)
 
 
-class IntentType(str, Enum):
-    """意图类型"""
-    QUERY = "query"  # 直接查询
-    GITHUB_INGEST = "github_ingest"  # 需要从 GitHub 获取数据
-    PREPROCESS = "preprocess"  # 需要数据预处理
-    UNKNOWN = "unknown"  # 未知意图
-
-
+# LangGraph 兼容层：TypedDict 用于 LangGraph 状态管理
+# 保留 TypedDict 以兼容 LangGraph，同时使用 Pydantic 模型进行验证
 if TypedDict:
     class AgentState(TypedDict):
-        """Agent 状态"""
-        messages: Annotated[List[Dict], "消息列表"]
+        """Agent 状态（LangGraph 兼容层）
+
+        注意：此 TypedDict 仅用于 LangGraph 状态管理。
+        实际数据验证使用 utils.schema.AgentState（Pydantic）。
+        """
+        messages: Annotated[List[Dict], add]
         intent: str  # 意图类型
         query: str  # 查询文本
         need_github_ingest: bool  # 是否需要从 GitHub 获取数据
