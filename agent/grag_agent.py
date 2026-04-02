@@ -573,6 +573,7 @@ class GRAGAgent:
                 "done": True,
                 "full_answer": full_answer,
                 "context_ids": context_ids,
+                "context_metadata": context_metadata,  # 新增：方案 B（结束标记）
                 "response_time": response_time,
                 "model_type": self.model_manager.get_current_model_type(),
                 "from_cache": False,
@@ -624,25 +625,49 @@ class GRAGAgent:
             final_state = self.app.invoke(initial_state)
 
             if final_state.get("error"):
-                return {
+                # 方案 A：最小化错误返回 + debug 级别完整字段日志
+                error_response = {
                     "success": False,
-                    "error": final_state["error"],
-                    "answer": ""
+                    "error": final_state["error"]
                 }
+                logger.debug(f"Agent 错误响应（完整）: {final_state}")
+                return error_response
 
-            return {
+            # 方案 B：出口验证 - 使用 Pydantic 模型验证响应
+            response_data = {
                 "success": True,
                 "answer": final_state.get("answer", ""),
                 "context_ids": final_state.get("context_ids", []),
+                "context_metadata": final_state.get("context_metadata", []),
                 "intent": final_state.get("intent", ""),
                 "citations": final_state.get("citations", []),
                 "citation_info": final_state.get("citation_info", {})
             }
+
+            # Pydantic 验证（出口）
+            try:
+                from utils.schema import QueryResponse
+                validated = QueryResponse(
+                    success=response_data["success"],
+                    answer=response_data["answer"],
+                    context_ids=response_data["context_ids"],
+                    context_metadata=response_data["context_metadata"],
+                    response_time=0.0,  # 占位，由 API 层填充
+                    model_type=self.model_manager.get_current_model_type(),
+                    from_cache=False,
+                    citations=response_data["citations"],
+                    citation_info=response_data["citation_info"]
+                )
+                logger.debug(f"Agent 响应已通过 Pydantic 验证")
+            except Exception as validation_error:
+                logger.warning(f"Agent 响应验证失败（继续返回）: {validation_error}")
+
+            return response_data
         except Exception as e:
             logger.error(f"Agent 执行失败: {e}")
+            logger.debug(f"Agent 异常详情（完整）: {initial_state}")
             return {
                 "success": False,
-                "error": str(e),
-                "answer": ""
+                "error": str(e)
             }
 

@@ -94,14 +94,15 @@ def query(
                     success=True,
                     answer=cached_result['answer'],
                     context_ids=cached_result.get('context_ids', []),
+                    context_metadata=cached_result.get('context_metadata', []),  # 新增
                     response_time=time.time() - start_time,
                     model_type=cached_result.get('model_type', 'unknown'),
                     from_cache=True
                 )
-        
+
         # 执行查询
         result = agent.query(request.query, stream=request.stream)
-        
+
         if not result.get("success"):
             return QueryResponse(
                 success=False,
@@ -110,7 +111,7 @@ def query(
                 model_type=model_manager.get_current_model_type(),
                 error=result.get("error", "查询失败")
             )
-        
+
         response_time = time.time() - start_time
 
         # 保存到缓存
@@ -120,7 +121,8 @@ def query(
                 answer=result["answer"],
                 context_ids=result.get("context_ids", []),
                 model_type=model_manager.get_current_model_type(),
-                response_time=response_time
+                response_time=response_time,
+                context_metadata=result.get("context_metadata", [])  # 新增
             )
 
         # 记录指标

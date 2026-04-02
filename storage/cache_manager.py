@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Union, Any
-from sqlalchemy import create_engine, Column, Integer, String, Float, Text, TIMESTAMP, ARRAY
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text, TIMESTAMP, ARRAY, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
@@ -28,7 +28,11 @@ Base = declarative_base()
 
 
 class QueryCache(Base):
-    """查询缓存表模型（PostgreSQL）"""
+    """查询缓存表模型（PostgreSQL）
+
+    改进：添加 context_metadata 字段以支持新的协议层。
+    迁移策略：清空旧缓存数据（方案 A）。
+    """
     __tablename__ = "query_cache"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -36,6 +40,7 @@ class QueryCache(Base):
     query_text = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
     context_ids = Column(ARRAY(String))  # 关联的文档/实体ID列表
+    context_metadata = Column(JSON, nullable=True, default=list)  # 新增：完整的上下文元数据
     quality_score = Column(Float, default=0.5)
     feedback_count = Column(Integer, default=0)
     positive_feedback = Column(Integer, default=0)
@@ -154,7 +159,10 @@ class CacheManager:
             return self._get_cache_postgresql(query)
 
     def _get_cache_postgresql(self, query: str) -> Optional[Dict]:
-        """PostgreSQL 模式：获取缓存"""
+        """PostgreSQL 模式：获取缓存
+
+        改进：添加 context_metadata 字段返回。
+        """
         query_hash = self._hash_query(query)
         session = self.SessionLocal()
 
@@ -172,6 +180,7 @@ class CacheManager:
                 return {
                     'answer': cache_entry.answer,
                     'context_ids': cache_entry.context_ids or [],
+                    'context_metadata': cache_entry.context_metadata or [],  # 新增
                     'quality_score': cache_entry.quality_score,
                     'model_type': cache_entry.model_type,
                     'response_time': cache_entry.response_time
@@ -190,10 +199,13 @@ class CacheManager:
         answer: str,
         context_ids: List[str],
         model_type: str,
-        response_time: float
+        response_time: float,
+        context_metadata: Optional[List[Dict]] = None  # 新增参数
     ):
         """
         设置缓存
+
+        改进：添加 context_metadata 参数支持完整元数据存储。
 
         Args:
             query: 查询文本
@@ -201,6 +213,7 @@ class CacheManager:
             context_ids: 关联的文档/实体ID列表
             model_type: 使用的模型类型
             response_time: 响应时间（秒）
+            context_metadata: 完整的上下文元数据（可选）
         """
         if self._use_injection:
             # 依赖注入模式：委托给存储实现
@@ -209,11 +222,12 @@ class CacheManager:
                 answer=answer,
                 context_ids=context_ids,
                 model_type=model_type,
-                response_time=response_time
+                response_time=response_time,
+                context_metadata=context_metadata or []  # 传递新参数
             )
         else:
             # 兼容模式：使用 PostgreSQL
-            self._set_cache_postgresql(query, answer, context_ids, model_type, response_time)
+            self._set_cache_postgresql(query, answer, context_ids, model_type, response_time, context_metadata)
 
     def _set_cache_postgresql(
         self,
@@ -221,9 +235,13 @@ class CacheManager:
         answer: str,
         context_ids: List[str],
         model_type: str,
-        response_time: float
+        response_time: float,
+        context_metadata: Optional[List[Dict]] = None  # 新增参数
     ):
-        """PostgreSQL 模式：设置缓存"""
+        """PostgreSQL 模式：设置缓存
+
+        改进：添加 context_metadata 字段存储。
+        """
         query_hash = self._hash_query(query)
         session = self.SessionLocal()
 
@@ -237,6 +255,7 @@ class CacheManager:
                 # 更新现有缓存
                 cache_entry.answer = answer
                 cache_entry.context_ids = context_ids
+                cache_entry.context_metadata = context_metadata or []  # 新增
                 cache_entry.model_type = model_type
                 cache_entry.response_time = response_time
                 cache_entry.last_accessed_at = datetime.now()
@@ -247,6 +266,7 @@ class CacheManager:
                     query_text=query,
                     answer=answer,
                     context_ids=context_ids,
+                    context_metadata=context_metadata or [],  # 新增
                     model_type=model_type,
                     response_time=response_time
                 )

@@ -16,11 +16,14 @@ Pydantic Schema 定义
 """
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional, Literal, Union
 from enum import Enum
 import hashlib
+import logging
 
 from pydantic import BaseModel, Field, computed_field, model_validator, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class DocMetadata(BaseModel):
@@ -79,6 +82,44 @@ class RawDoc(BaseModel):
             else:
                 return "text"
         return v
+
+    @model_validator(mode='after')
+    def validate_and_log_metadata(self) -> "RawDoc":
+        """
+        验证和记录 metadata 字段（方案 B：可选使用 + debug 日志）
+
+        尝试将 Dict[str, Any] 转换为 DocMetadata，记录转换路径。
+        """
+        if not self.metadata:
+            return self
+
+        # 检查 metadata 是否已经是 DocMetadata 格式
+        required_fields = {"type", "url", "frontmatter", "tags", "version"}
+        if required_fields.issubset(self.metadata.keys()):
+            # 已经是 DocMetadata 格式
+            logger.debug(f"RawDoc({self.path}): metadata 已符合 DocMetadata 格式")
+            return self
+
+        # 尝试自动转换为 DocMetadata
+        try:
+            doc_metadata = DocMetadata(
+                type=self.metadata.get("type", self.file_type),
+                url=self.metadata.get("url", self.source_url),
+                frontmatter=self.metadata.get("frontmatter", {}),
+                tags=self.metadata.get("tags", []),
+                version=self.metadata.get("version", "1.0"),
+                extracted_at=self.metadata.get("extracted_at")
+            )
+            # 使用转换后的 DocMetadata 的字典形式
+            metadata_dict = doc_metadata.model_dump()
+            logger.debug(f"RawDoc({self.path}): metadata 已自动转换为 DocMetadata: {metadata_dict}")
+            # 更新 metadata 字段（需要创建新对象）
+            object.__setattr__(self, 'metadata', metadata_dict)
+        except Exception as e:
+            # 转换失败，保持原样
+            logger.debug(f"RawDoc({self.path}): metadata 保持 Dict 格式（转换失败: {e}）")
+
+        return self
 
 
 class IngestionBatch(BaseModel):
@@ -304,12 +345,14 @@ class AgentState(BaseModel):
 class QueryCacheEntry(BaseModel):
     """查询缓存条目模型
 
+    改进：添加 context_metadata 字段以支持完整元数据。
     标准化缓存数据结构，提供类型安全。
     """
     query_hash: str = Field(..., description="查询的 SHA256 哈希值")
     query_text: str = Field(..., description="查询文本")
     answer: str = Field(..., description="生成的答案")
     context_ids: List[str] = Field(default_factory=list, description="上下文 ID 列表")
+    context_metadata: List[Dict[str, Any]] = Field(default_factory=list, description="完整的上下文元数据")  # 新增
     quality_score: float = Field(default=0.5, ge=0.0, le=1.0, description="质量评分（0-1）")
     feedback_count: int = Field(default=0, ge=0, description="反馈次数")
     positive_feedback: int = Field(default=0, ge=0, description="正面反馈数")

@@ -104,6 +104,18 @@ tests/
 !tests/run_*.py
 !tests/BENCHMARKS.md
 
+# 临时测试目录和脚本
+benchmark_results/
+test_bm25_grag/
+scripts/diagnose_*.py
+scripts/test_fixed_entity_extraction.py
+scripts/test_prompt_formatting.py
+scripts/test_query.py
+
+# 存储备份
+rag_storage_backup*/
+rag_storage.backup*/
+
 # 开发用文档（保留 README 等解释性文档，不跟踪内部开发文档）
 AGENTS.md
 QUICK_CHECK.md

@@ -37,89 +37,123 @@ lightrag:
   vector_storage: ${LIGHTRAG_VECTOR_STORAGE:NanoVectorDBStorage}  # NanoVectorDBStorage, PGVectorStorage
   graph_storage: ${LIGHTRAG_GRAPH_STORAGE:NetworkXStorage}  # NetworkXStorage, PGGraphStorage, Neo4JStorage
   doc_status_storage: ${LIGHTRAG_DOC_STATUS_STORAGE:JsonDocStatusStorage}  # JsonDocStatusStorage, PGDocStatusStorage
-  # 实体/关系抽取的 prompt
+  # 实体/关系抽取的 prompt（符合 LightRAG 格式要求）
   entity_extraction_prompt: |
-    你是一个技术文档实体抽取专家。请从以下技术文档文本中提取关键实体。
+    ---Role---
+    You are a Technical Documentation Knowledge Graph Specialist responsible for extracting entities and relationships from technical documentation text.
 
-    实体类型定义（12个核心类型）：
+    ---Instructions---
+    1. **Entity Extraction & Output:**
+       * **Identification:** Identify clearly defined and meaningful entities in the input text, focusing on technical concepts, APIs, components, and configurations.
+       * **Entity Types:** Use ONLY the following entity types: {entity_types}
+          The available entity types include but are not limited to: Technology (frameworks, libraries), Concept (design patterns, principles), Component (modules, classes), API (interfaces, endpoints), Command (CLI instructions), Configuration (parameters, settings), Operation (workflows, tasks), File (paths, scripts), Resource (infrastructure, data sources), Service (running services), Environment (deployment contexts), Document (reference materials)
+       * **Extraction Principles:**
+         - Prioritize entities valuable for technical document retrieval
+         - Keep entity names concise and clear
+         - Choose the most appropriate type for borderline cases
+         - Technology covers frameworks, libraries, tools, languages
+       * **Entity Details:** For each identified entity, extract:
+         - `entity_name`: The name of the entity (use consistent naming, e.g., "FastAPI", "PostgreSQL", "Docker Compose")
+         - `entity_type`: One of the entity types listed above
+         - `entity_description`: A concise technical description based on the input text
+       * **Output Format - Entities:** Output a total of 4 fields for each entity, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `entity`.
+         - Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
 
-    1. Technology（技术）：框架、库、语言、工具、平台等
-       示例：React, FastAPI, PostgreSQL, Docker, Python, Git, Kubernetes
+    2. **Relationship Extraction & Output:**
+       * **Identification:** Identify direct, meaningful relationships between extracted entities.
+       * **Relationship Types:** Use ONLY the following 7 relationship types:
+          - **depends_on**: One entity depends on another to function (e.g., Application depends_on PostgreSQL)
+          - **uses**: One entity uses another's functionality (e.g., Controller uses Service)
+          - **implements**: One entity implements another's interface (e.g., UserController implements APIInterface)
+          - **contains**: One entity contains another as a component (e.g., Application contains Database)
+          - **configures**: One entity configures another's behavior (e.g., .env configures Application)
+          - **deploys_to**: One entity deploys to another (e.g., Application deploys_to Docker)
+          - **relates_to**: Entities are related but relationship is unclear (e.g., Microservices relates_to Docker)
+       * **Relationship Details:** For each relationship, extract:
+         - `source_entity`: The name of the source entity
+         - `target_entity`: The name of the target entity
+         - `relationship_keywords`: High-level keywords (comma-separated)
+         - `relationship_description`: Technical explanation of the relationship
+       * **Output Format - Relationships:** Output a total of 5 fields, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `relation`.
+         - Format: `relation{tuple_delimiter}source_entity{tuple_delimiter}target_entity{tuple_delimiter}relationship_keywords{tuple_delimiter}relationship_description`
 
-    2. Concept（概念）：抽象概念、设计模式、技术原理
-       示例：异步编程, 微服务架构, 依赖注入, 中间件, 容器化, RESTful
+    3. **Delimiter Usage Protocol:**
+       * The `{tuple_delimiter}` is a complete marker and must not be filled with content. It serves strictly as a field separator.
 
-    3. Component（组件）：系统组成单元、模块、类
-       示例：API控制器, 数据模型, 中间件, 服务层, 路由组件
+    4. **Output Order & Prioritization:**
+       * Output all extracted entities first, followed by all extracted relationships.
+       * Prioritize relationships most significant to the technical architecture.
 
-    4. API（接口）：可编程接口、端点、函数
-       示例：REST API, /api/v1/users, openai.chat(), GraphQL query
+    5. **Context & Objectivity:**
+       * Ensure all entity names and descriptions are written in the **third person**.
+       * Explicitly name technical components; avoid generic pronouns like "this", "that", "it".
 
-    5. Command（命令）：命令行指令、脚本命令
-       示例：npm install, docker-compose up, git push, python main.py
+    6. **Language & Proper Nouns:**
+       * The entire output must be written in `{language}`.
+       * Keep technical terms, API names, and command syntax in their original form.
 
-    6. Configuration（配置）：配置项、参数、环境变量
-       示例：DATABASE_URL, MAX_CONNECTIONS, timeout, .env 文件中的配置项
+    7. **Completion Signal:** Output the literal string `{completion_delimiter}` only after all entities and relationships have been completely extracted.
 
-    7. Operation（操作）：操作流程、任务、步骤
-       示例：数据库迁移, 身份验证流程, 数据预处理, 部署流程
+    ---Examples---
+    <Input Text>
+    ```
+    FastAPI is a modern, fast web framework for building APIs with Python 3.7+ based on standard Python type hints.
 
-    8. File（文件）：文件路径、配置文件、脚本文件
-       示例：config.yaml, main.py, Dockerfile, .gitignore, requirements.txt
+    Install FastAPI using pip:
+    pip install fastapi
+    pip install uvicorn[standard]
 
-    9. Resource（资源）：外部依赖、数据源、基础设施
-       示例：PostgreSQL数据库, Redis缓存, S3存储, Kafka消息队列
+    Create a simple application:
+    from fastapi import FastAPI
+    app = FastAPI()
 
-    10. Service（服务）：运行服务、后台任务、微服务
-        示例：API服务, 后台任务处理, 消息队列消费者, 定时任务服务
+    @app.get("/api/v1/users")
+    async def get_users():
+        return {{"users": []}}
+    ```
 
-    11. Environment（环境）：部署环境、运行环境
-        示例：生产环境, 开发环境, Docker容器, Kubernetes Pod
+    <Output>
+    entity{tuple_delimiter}FastAPI{tuple_delimiter}Technology{tuple_delimiter}FastAPI is a modern web framework for building APIs with Python 3.7+ using type hints.
+    entity{tuple_delimiter}Python{tuple_delimiter}Technology{tuple_delimiter}Python is a programming language version 3.7+ used with FastAPI.
+    entity{tuple_delimiter}pip{tuple_delimiter}Command{tuple_delimiter}pip is a package installer command for Python libraries.
+    entity{tuple_delimiter}uvicorn[standard]{tuple_delimiter}Technology{tuple_delimiter}Uvicorn is an ASGI server with standard extras for running FastAPI applications.
+    entity{tuple_delimiter}/api/v1/users{tuple_delimiter}API{tuple_delimiter}/api/v1/users is a REST API endpoint for retrieving users.
+    entity{tuple_delimiter}get_users{tuple_delimiter}API{tuple_delimiter}get_users is an async function that handles user retrieval requests.
+    relation{tuple_delimiter}FastAPI{tuple_delimiter}Python{tuple_delimiter}requires, language{tuple_delimiter}FastAPI requires Python 3.7+ to function.
+    relation{tuple_delimiter}FastAPI{tuple_delimiter}uvicorn[standard]{tuple_delimiter}runs on, deployment{tuple_delimiter}FastAPI applications run on uvicorn ASGI server.
+    relation{tuple_delimiter}get_users{tuple_delimiter}/api/v1/users{tuple_delimiter}implements, endpoint{tuple_delimiter}get_users function implements the /api/v1/users API endpoint.
+    {completion_delimiter}
 
-    12. Document（文档）：文档和参考资源
-        示例：API文档, RFC规范, 官方文档, README, 技术博客
+    <Input Text>
+    ```
+    Deploy the application using Docker Compose:
+    docker-compose up -d
 
-    抽取原则：
-    - 优先抽取对用户检索有价值的关键实体
-    - 实体名称应简洁明确，避免冗余描述
-    - 对于边界情况，选择最符合检索场景的类型
-    - Technology 类型涵盖框架、库、工具、语言，不细分
+    Configuration in .env file:
+    DATABASE_URL=postgresql://user:pass@localhost/db
+    MAX_CONNECTIONS=100
+    ```
 
-    文本内容：
-    {text}
-  relation_extraction_prompt: |
-    你是一个技术文档关系抽取专家。请从以下文本中提取实体之间的关系。
+    <Output>
+    entity{tuple_delimiter}Docker Compose{tuple_delimiter}Technology{tuple_delimiter}Docker Compose is a tool for defining and running multi-container Docker applications.
+    entity{tuple_delimiter}docker-compose up{tuple_delimiter}Command{tuple_delimiter}docker-compose up is a command to start Docker Compose services.
+    entity{tuple_delimiter}.env{tuple_delimiter}File{tuple_delimiter}.env is a configuration file for environment variables.
+    entity{tuple_delimiter}DATABASE_URL{tuple_delimiter}Configuration{tuple_delimiter}DATABASE_URL is a configuration parameter for PostgreSQL connection string.
+    entity{tuple_delimiter}MAX_CONNECTIONS{tuple_delimiter}Configuration{tuple_delimiter}MAX_CONNECTIONS is a configuration parameter setting the maximum database connections to 100.
+    entity{tuple_delimiter}PostgreSQL{tuple_delimiter}Resource{tuple_delimiter}PostgreSQL is a relational database resource for data storage.
+    relation{tuple_delimiter}Docker Compose{tuple_delimiter}docker-compose up{tuple_delimiter}uses, command{tuple_delimiter}Docker Compose uses the docker-compose up command to start services.
+    relation{tuple_delimiter}.env{tuple_delimiter}DATABASE_URL{tuple_delimiter}configures, contains{tuple_delimiter}.env file contains and configures the DATABASE_URL parameter.
+    relation{tuple_delimiter}DATABASE_URL{tuple_delimiter}PostgreSQL{tuple_delimiter}connects to, resource{tuple_delimiter}DATABASE_URL defines the connection to PostgreSQL resource.
+    {completion_delimiter}
 
-    关系类型定义：
-
-    1. depends_on（依赖）：一个实体依赖另一个实体才能正常工作
-       示例：Application depends_on PostgreSQL, FastAPI depends_on Pydantic
-
-    2. uses（使用）：一个实体使用另一个实体的功能
-       示例：Controller uses Service, API uses Database
-
-    3. implements（实现）：一个实体实现另一个实体定义的接口或规范
-       示例：UserController implements APIInterface, Repository implements ORM
-
-    4. contains（包含）：一个实体包含另一个实体作为组成部分
-       示例：Application contains API层, System contains Database
-
-    5. configures（配置）：一个实体配置另一个实体的行为
-       示例：.env configures Application, config.yaml configures Service
-
-    6. deploys_to（部署）：一个实体部署到另一个实体
-       示例：Application deploys_to Docker, Service deploys_to Kubernetes
-
-    7. relates_to（相关）：两个实体存在关联但关系不明确
-       示例：Microservices relates_to Docker（微服务和Docker相关但不是上述明确关系）
-
-    抽取原则：
-    - 优先抽取对理解系统架构和检索有价值的关系
-    - 关系描述应简洁明确
-    - 避免抽取过于琐碎的关系
-
-    文本内容：
-    {text}
+    ---Real Data to be Processed---
+    <Input>
+    Entity_types: {entity_types}
+    Text:
+    ```
+    {input_text}
+    ```
+    ```
 
   # BM25 关键词检索配置
   bm25:

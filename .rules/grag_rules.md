@@ -261,6 +261,63 @@ if not client:
 # 文档更新不频繁，可以缓存几小时到几天
 ```
 
+### 13. 网络和代理配置
+
+**问题背景**:
+GRAG 系统使用 OpenAI 兼容 API（SiliconFlow）进行嵌入操作，Python 的 httpx 库（OpenAI 库底层使用）会自动检测并使用 Windows 系统代理，即使代理被禁用。
+
+**症状**:
+- 查询请求超时（60秒）
+- 日志显示 `ConnectTimeout` 或 `Failed to connect to 127.0.0.1:7897`
+- Health 端点正常但 Query 端点超时
+
+**根本原因**:
+Windows 注册表中存在代理服务器配置：
+```
+ProxyEnable    = 0x0 (禁用)
+ProxyServer    = 127.0.0.1:7897  ← httpx 仍会尝试使用
+```
+
+**诊断命令**:
+```bash
+# 检查 Windows 代理配置
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" | findstr -i "proxy"
+
+# 检查环境变量
+echo HTTP_PROXY=%HTTP_PROXY%
+echo HTTPS_PROXY=%HTTPS_PROXY%
+
+# 测试代理连通性
+curl -x http://127.0.0.1:7897 --connect-timeout 5 https://www.google.com
+```
+
+**解决方案（三选一）**:
+
+**方案 A: 清除注册表代理配置**（推荐）
+```bash
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer /f
+```
+
+**方案 B: 在 .env 中设置 NO_PROXY**
+```bash
+# 在 .env 文件中添加
+NO_PROXY=*
+```
+
+**方案 C: 修改代码显式禁用代理**
+```python
+# 在 knowledge/lightrag_wrapper.py 的 embedding_func 中
+import httpx
+client = httpx.Client(proxy=None)  # 显式禁用代理
+```
+
+**检查清单**（当遇到 API 超时时）:
+1. ✅ 检查注册表代理配置
+2. ✅ 检查环境变量（HTTP_PROXY, HTTPS_PROXY）
+3. ✅ 测试外部 API 连通性
+4. ✅ 查看日志中的 `ConnectTimeout` 错误
+5. ✅ 确认代理服务是否运行
+
 ## 总结
 
 **最重要的规则**:
@@ -270,5 +327,6 @@ if not client:
 4. ✅ 使用类型注解和 docstrings
 5. ✅ 可选功能静默失败
 6. ✅ Context7 作为补充工具
+7. ✅ API 超时首先检查代理配置
 
 **触发时机**: 每次执行 Python 脚本、创建新脚本、添加依赖时，都需要遵循这些规则。
