@@ -723,45 +723,73 @@ class LightRAGWrapper:
     
     def _update_metadata_batch(self, metadata_list: List[Dict[str, Any]]) -> int:
         """
-        批量更新 Metadata 到 LIGHTRAG_DOC_FULL.meta 字段
-        
-        使用 LightRAG 的 PostgreSQLDB 连接执行 SQL UPDATE。
-        
+        批量更新 Metadata 到存储层
+
+        支持 PostgreSQL 和 JSON 两种存储模式。
+
         Args:
             metadata_list: 包含 doc_id 和 metadata 的字典列表
-            
+
+        Returns:
+            成功更新的文档数量
+        """
+        try:
+            # 检测存储模式
+            storage_mode = os.environ.get("STORAGE_MODE", "json").lower()
+
+            if storage_mode == "postgresql":
+                # PostgreSQL 存储：使用 SQL UPDATE
+                return self._update_metadata_postgresql(metadata_list)
+            else:
+                # JSON 存储：直接写入文件
+                return self._update_metadata_json(metadata_list)
+
+        except Exception as e:
+            logger.error(f"批量更新 Metadata 失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+
+    def _update_metadata_postgresql(self, metadata_list: List[Dict[str, Any]]) -> int:
+        """
+        PostgreSQL 存储的 metadata 更新
+
+        Args:
+            metadata_list: 包含 doc_id 和 metadata 的字典列表
+
         Returns:
             成功更新的文档数量
         """
         try:
             # 获取 LightRAG 的 workspace（默认是 "default"）
             workspace = os.environ.get("POSTGRES_WORKSPACE", "default")
-            
+
             # 尝试获取 LightRAG 的数据库连接
-            # 注意：LightRAG 使用 ClientManager 管理连接，我们需要通过存储层访问
             from lightrag.kg.postgres_impl import ClientManager
-            
-            # 使用异步方式更新（LightRAG 的数据库操作都是异步的）
+
+            # 使用异步方式更新
             async def update_metadata_async():
                 db = await ClientManager.get_client()
                 updated_count = 0
-                
+
                 for meta_info in metadata_list:
                     doc_id = meta_info['doc_id']
-                    metadata_json = json.dumps(meta_info['metadata'], ensure_ascii=False)
-                    
+                    # 构建完整的metadata对象
+                    metadata_dict = {
+                        'source_url': meta_info.get('source_url', ''),
+                        'file_path': meta_info.get('file_path', ''),
+                        'file_type': meta_info.get('file_type', ''),
+                        **meta_info.get('metadata', {})
+                    }
+                    metadata_json = json.dumps(metadata_dict, ensure_ascii=False)
+
                     # 执行 UPDATE SQL
-                    # 注意：PostgreSQLDB.execute() 使用字典，然后转换为 tuple(data.values())
-                    # SQL 需要使用 $1, $2, $3 占位符（asyncpg 格式）
-                    # 字典的键顺序不重要，但值的顺序必须匹配 SQL 中的占位符顺序
                     sql = """
-                        UPDATE LIGHTRAG_DOC_FULL 
+                        UPDATE LIGHTRAG_DOC_FULL
                         SET meta = $1::jsonb
                         WHERE id = $2 AND workspace = $3
                     """
                     try:
-                        # 按 SQL 占位符顺序传递值：$1=metadata_json, $2=doc_id, $3=workspace
-                        # 注意：字典的值的顺序必须与 SQL 占位符顺序一致
                         await db.execute(sql, {
                             'meta_json': metadata_json,  # $1
                             'doc_id': doc_id,            # $2
@@ -771,21 +799,78 @@ class LightRAGWrapper:
                     except Exception as e:
                         logger.warning(f"更新 Metadata 失败 (doc_id={doc_id}): {e}")
                         continue
-                
+
                 await ClientManager.release_client(db)
                 return updated_count
-            
+
             # 运行异步更新
             if _is_jupyter() and _jupyter_nest_asyncio_enabled:
-                # Jupyter 环境，直接运行
                 import nest_asyncio
                 return nest_asyncio.run(update_metadata_async())
             else:
-                # 普通环境，使用 asyncio.run
                 return asyncio.run(update_metadata_async())
-                
+
         except Exception as e:
-            logger.error(f"批量更新 Metadata 失败: {e}")
+            logger.error(f"PostgreSQL metadata 更新失败: {e}")
+            return 0
+
+    def _update_metadata_json(self, metadata_list: List[Dict[str, Any]]) -> int:
+        """
+        JSON 存储的 metadata 更新
+
+        直接更新 kv_store_full_docs.json 文件。
+
+        Args:
+            metadata_list: 包含 doc_id 和 metadata 的字典列表
+
+        Returns:
+            成功更新的文档数量
+        """
+        try:
+            from pathlib import Path
+
+            # 确定 working_dir（与LightRAG保持一致）
+            working_dir = getattr(self, 'working_dir', './rag_storage')
+            full_docs_file = Path(working_dir) / "kv_store_full_docs.json"
+
+            # 读取现有文档数据
+            if full_docs_file.exists():
+                with open(full_docs_file, 'r', encoding='utf-8') as f:
+                    full_docs = json.load(f)
+            else:
+                logger.warning(f"文件不存在: {full_docs_file}")
+                return 0
+
+            # 更新每个文档的metadata
+            updated_count = 0
+            for meta_info in metadata_list:
+                doc_id = meta_info['doc_id']
+
+                if doc_id not in full_docs:
+                    logger.debug(f"文档不存在于 kv_store_full_docs: {doc_id}")
+                    continue
+
+                # 构建完整的文档信息
+                full_docs[doc_id]['source_url'] = meta_info.get('source_url', '')
+                full_docs[doc_id]['file_path'] = meta_info.get('file_path', '')
+                full_docs[doc_id]['file_type'] = meta_info.get('file_type', '')
+
+                # 合并metadata
+                if 'metadata' not in full_docs[doc_id]:
+                    full_docs[doc_id]['metadata'] = {}
+                full_docs[doc_id]['metadata'].update(meta_info.get('metadata', {}))
+
+                updated_count += 1
+
+            # 写回文件
+            with open(full_docs_file, 'w', encoding='utf-8') as f:
+                json.dump(full_docs, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"JSON metadata 更新完成: {updated_count}/{len(metadata_list)}")
+            return updated_count
+
+        except Exception as e:
+            logger.error(f"JSON metadata 更新失败: {e}")
             import traceback
             traceback.print_exc()
             return 0
@@ -1092,8 +1177,10 @@ class LightRAGWrapper:
         lightrag_config = config.get_lightrag_config()
         bm25_config = lightrag_config.get('bm25', {})
         rrf_k = bm25_config.get('rrf_k', 60)
+        rrf_adaptive = bm25_config.get('rrf_adaptive', True)
+        rrf_strategy = bm25_config.get('rrf_strategy', 'auto')
 
-        logger.info(f"使用混合检索模式 (Vector + BM25), RRF_K={rrf_k}")
+        logger.info(f"使用混合检索模式 (Vector + BM25), RRF_K={rrf_k}, 自适应={rrf_adaptive}, 策略={rrf_strategy}")
 
         # 1. 并行执行两种检索
         # LightRAG 向量检索
@@ -1149,7 +1236,9 @@ class LightRAGWrapper:
         # 2. RRF 融合
         fused_results = reciprocal_rank_fusion(
             [vector_results, bm25_results],
-            k=rrf_k
+            k=rrf_k,
+            adaptive=rrf_adaptive,
+            strategy=rrf_strategy
         )
 
         # 3. 提取 top-k 结果

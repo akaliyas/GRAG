@@ -328,23 +328,134 @@ class BM25Indexer:
             return False
 
 
+def calculate_adaptive_rrf_k(
+    results_list: List[List[Dict[str, Any]]],
+    base_k: int = 60,
+    strategy: str = "auto"
+) -> int:
+    """
+    计算自适应 RRF k 值
+
+    根据检索结果的数量和质量特征动态调整 RRF 参数 k。
+
+    Args:
+        results_list: 多个检索结果列表的列表
+        base_k: 基础 k 值 (默认 60)
+        strategy: 调整策略
+            - "auto": 自动选择 (默认)
+            - "conservative": 保守策略，保持较高 k 值
+            - "aggressive": 激进策略，降低 k 值以增强排名影响
+            - "source_count": 基于检索源数量调整
+            - "score_variance": 基于分数方差调整
+
+    Returns:
+        调整后的 k 值
+    """
+    if not results_list:
+        return base_k
+
+    valid_results = [r for r in results_list if r]
+    num_sources = len(valid_results)
+
+    if num_sources == 0:
+        return base_k
+
+    if strategy == "conservative":
+        # 保守策略：保持较高 k 值，降低排名差异影响
+        return max(base_k, 60)
+
+    elif strategy == "aggressive":
+        # 激进策略：降低 k 值，增强排名权重
+        return min(base_k, 30)
+
+    elif strategy == "source_count":
+        # 基于检索源数量调整
+        # 更多检索源 → 降低 k 值 (让每个源的排名更有区分度)
+        # 较少检索源 → 提高 k 值 (减少排名过重的影响)
+        if num_sources >= 3:
+            return int(base_k * 0.7)
+        elif num_sources == 2:
+            return int(base_k * 0.85)
+        else:
+            return base_k
+
+    elif strategy == "score_variance":
+        # 基于分数方差调整
+        # 高方差 → 检索源质量差异大 → 提高 k 值平衡
+        # 低方差 → 检索源质量接近 → 降低 k 值增强区分度
+        all_scores = []
+        for results in valid_results:
+            scores = [r.get('score', 0) for r in results if r.get('score', 0) > 0]
+            all_scores.extend(scores)
+
+        if len(all_scores) < 2:
+            return base_k
+
+        # 计算分数的变异系数 (CV = std/mean)
+        import statistics
+        mean_score = statistics.mean(all_scores)
+        if mean_score == 0:
+            return base_k
+
+        std_score = statistics.stdev(all_scores)
+        cv = std_score / mean_score
+
+        # CV > 1.0: 高方差，提高 k 值
+        # CV < 0.5: 低方差，降低 k 值
+        if cv > 1.0:
+            return int(base_k * 1.3)
+        elif cv < 0.5:
+            return int(base_k * 0.7)
+        else:
+            return base_k
+
+    else:  # "auto"
+        # 自动策略：综合考量检索源数量和结果质量
+        # 基础调整：基于检索源数量
+        k = calculate_adaptive_rrf_k(results_list, base_k, "source_count")
+
+        # 二次调整：基于结果数量平衡
+        # 如果某个检索源结果很少，降低 k 值以避免该源被完全忽略
+        min_results = min(len(r) for r in valid_results)
+        max_results = max(len(r) for r in valid_results)
+
+        if max_results > 0 and min_results / max_results < 0.3:
+            # 结果数量不平衡，降低 k 值
+            k = int(k * 0.85)
+
+        return max(20, min(k, 100))  # 限制在合理范围内
+
+
 def reciprocal_rank_fusion(
     results_list: List[List[Dict[str, Any]]],
-    k: int = 60
+    k: int = 60,
+    adaptive: bool = False,
+    strategy: str = "auto"
 ) -> List[Dict[str, Any]]:
     """
     Reciprocal Rank Fusion (RRF) 算法
 
     融合多个检索结果列表，生成统一的排序结果。
+    支持自适应 k 值计算。
 
     Args:
         results_list: 多个检索结果列表的列表
                       每个结果必须包含 doc_id 和 score
         k: RRF 常数，用于调整排名权重 (默认 60)
+           如果 adaptive=True，此值作为 base_k
+        adaptive: 是否使用自适应 k 值 (默认 False)
+        strategy: 自适应策略，仅在 adaptive=True 时生效
+                  可选: "auto", "conservative", "aggressive",
+                        "source_count", "score_variance"
 
     Returns:
         融合后的结果列表，按 RRF 分数降序排列
     """
+    # 计算自适应 k 值
+    if adaptive:
+        k = calculate_adaptive_rrf_k(results_list, base_k=k, strategy=strategy)
+        logger.debug(f"使用自适应 RRF k 值: {k} (策略: {strategy})")
+
     # 存储 RRF 分数
     rrf_scores = {}
 

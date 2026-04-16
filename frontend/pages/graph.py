@@ -41,19 +41,40 @@ def get_auth_headers():
 
 
 def fetch_graph_stats() -> Optional[Dict[str, Any]]:
-    """获取图统计信息"""
-    try:
-        response = requests.get(
-            f"{API_BASE_URL}/graph/stats",
-            headers=get_auth_headers(),
-            timeout=10
-        )
-        if response.ok:
-            data = response.json()
-            if data.get("success"):
-                return data.get("data")
-    except Exception as e:
-        logger.error(f"获取图统计失败: {e}")
+    """获取图统计信息（带重试机制）"""
+    max_retries = 3
+    retry_delay = 1
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/graph/stats",
+                headers=get_auth_headers(),
+                timeout=10
+            )
+            if response.ok:
+                data = response.json()
+                if data.get("success"):
+                    return data.get("data")
+                else:
+                    logger.warning(f"API返回失败: {data.get('error', 'Unknown error')}")
+                    return None
+            else:
+                logger.warning(f"API请求失败: HTTP {response.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning(f"请求超时 (尝试 {attempt + 1}/{max_retries})")
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"连接失败 (尝试 {attempt + 1}/{max_retries})")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"请求异常: {e}")
+        except Exception as e:
+            logger.error(f"获取图统计失败: {e}")
+            break
+
+        if attempt < max_retries - 1:
+            import time
+            time.sleep(retry_delay)
+
     return None
 
 
@@ -124,42 +145,104 @@ def create_network_graph(entities: List[Dict], relationships: List[Dict], max_no
         relationships: 关系列表
         max_nodes: 最大显示节点数
     """
-    if not entities or not relationships:
-        st.info("暂无图数据可显示")
+    # 输入验证
+    if not entities:
+        st.info("暂无实体数据可显示")
         return
 
-    # 限制节点数量
-    entities = entities[:max_nodes]
+    if not relationships:
+        st.info("暂无关系数据可显示")
+        # 仍然显示实体节点
+        relationships = []
+
+    # 限制节点数量并验证实体数据结构
+    valid_entities = []
+    seen_ids = set()
+
+    for entity in entities[:max_nodes]:
+        if not isinstance(entity, dict):
+            logger.warning(f"跳过无效实体: {entity}")
+            continue
+
+        entity_id = entity.get("entity_id")
+        if not entity_id:
+            logger.warning(f"跳过缺少 entity_id 的实体: {entity}")
+            continue
+
+        if entity_id in seen_ids:
+            logger.warning(f"跳过重复实体 ID: {entity_id}")
+            continue
+
+        seen_ids.add(entity_id)
+        valid_entities.append(entity)
+
+    if not valid_entities:
+        st.warning("没有有效的实体数据")
+        return
+
+    entities = valid_entities
 
     # 创建节点映射
     entity_ids = {e["entity_id"] for e in entities}
-    entity_names = {e["entity_id"]: e["entity_name"] for e in entities}
+    entity_names = {e["entity_id"]: e.get("entity_name", e["entity_id"]) for e in entities}
 
     # 过滤有效关系
-    valid_relationships = [
-        r for r in relationships
-        if r.get("source") in entity_ids and r.get("target") in entity_ids
-    ][:max_nodes * 2]
+    valid_relationships = []
+    seen_relations = set()
 
-    if not valid_relationships:
-        st.info("没有可显示的关系")
-        return
+    for rel in relationships[:max_nodes * 2]:
+        if not isinstance(rel, dict):
+            logger.warning(f"跳过无效关系: {rel}")
+            continue
+
+        source = rel.get("source")
+        target = rel.get("target")
+
+        if not source or not target:
+            logger.warning(f"跳过缺少 source/target 的关系: {rel}")
+            continue
+
+        if source not in entity_ids or target not in entity_ids:
+            continue
+
+        # 避免重复关系
+        relation_key = (source, target)
+        if relation_key in seen_relations:
+            continue
+        seen_relations.add(relation_key)
+
+        valid_relationships.append(rel)
 
     # 创建 NetworkX 图
     G = nx.Graph()
 
-    # 添加节点
+    # 添加节点（带数据验证）
     for entity in entities:
-        G.add_node(
-            entity["entity_id"],
-            label=entity["entity_name"],
-            type=entity.get("entity_type", "unknown"),
-            description=entity.get("description", "")
-        )
+        try:
+            entity_id = entity["entity_id"]
+            entity_name = entity.get("entity_name", entity_id)
+
+            # 安全截断描述
+            description = entity.get("description", "")
+            if description and len(description) > 200:
+                description = description[:200] + "..."
+
+            G.add_node(
+                entity_id,
+                label=entity_name,
+                type=str(entity.get("entity_type", "unknown")),
+                description=description
+            )
+        except Exception as e:
+            logger.error(f"添加节点失败: {e}")
+            continue
 
     # 添加边（带类型安全保护）
     for rel in valid_relationships:
         try:
+            source = rel["source"]
+            target = rel["target"]
+
             # 安全获取weight，确保是float类型
             weight = rel.get("weight", 1.0)
             if not isinstance(weight, (int, float)):
@@ -168,9 +251,12 @@ def create_network_graph(entities: List[Dict], relationships: List[Dict], max_no
                 except (ValueError, TypeError):
                     weight = 1.0
 
+            # 限制weight范围
+            weight = max(0.1, min(weight, 10.0))
+
             G.add_edge(
-                rel["source"],
-                rel["target"],
+                source,
+                target,
                 relation=str(rel.get("relation_type", "related")),
                 weight=weight
             )
@@ -178,9 +264,28 @@ def create_network_graph(entities: List[Dict], relationships: List[Dict], max_no
             logger.error(f"添加边失败: {e}")
             continue
 
-    # 计算布局
+    # 检查图是否为空
+    if G.number_of_nodes() == 0:
+        st.warning("图数据为空")
+        return
+
+    # 计算布局（根据图大小选择策略）
     try:
-        pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        num_nodes = G.number_of_nodes()
+
+        if num_nodes == 1:
+            # 单节点特殊处理
+            pos = {list(G.nodes())[0]: (0.5, 0.5)}
+        elif num_nodes <= 20:
+            # 小图使用spring layout
+            pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        elif num_nodes <= 100:
+            # 中等图调整参数
+            pos = nx.spring_layout(G, k=1, iterations=30, seed=42)
+        else:
+            # 大图使用快速布局
+            pos = nx.spring_layout(G, k=0.5, iterations=20, seed=42)
+
     except Exception as e:
         logger.error(f"计算布局失败: {e}")
         st.error("无法生成图布局")

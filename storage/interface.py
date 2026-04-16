@@ -215,6 +215,21 @@ class IKnowledgeStorage(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_source_summary(self) -> str:
+        """
+        获取知识库来源摘要
+
+        用于RAG注入，让LLM能够回答"知识库包含什么"这类问题。
+
+        Returns:
+            格式化的文本描述，例如：
+            "当前知识库包含 2 个来源：
+            1. github.com/user/repo-a (125 documents)
+            2. github.com/user/repo-b (89 documents)"
+        """
+        pass
+
 
 class StorageBackend:
     """存储后端类型枚举"""

@@ -12,6 +12,8 @@ from datetime import datetime
 
 from storage.interface import IKnowledgeStorage
 
+logger = logging.getLogger(__name__)
+
 
 class JSONKnowledgeStorage(IKnowledgeStorage):
     """
@@ -33,11 +35,16 @@ class JSONKnowledgeStorage(IKnowledgeStorage):
         self.data_dir = Path(data_dir)
         self.namespace = namespace
 
-        # LightRAG 存储文件路径
-        self._kv_store_file = self.data_dir / f"kv_store_{namespace}.json"
-        self._doc_status_file = self.data_dir / f"kv_store_full_docs_{namespace}.json"
-        self._chunk_store_file = self.data_dir / f"kv_store_chunked_entity_{namespace}.json"
-        self._graphml_file = self.data_dir / f"graph_{namespace}.graphml"
+        # LightRAG 存储文件路径（根据实际文件名）
+        self._kv_store_file = self.data_dir / "kv_store_llm_response_cache.json"
+        self._full_docs_file = self.data_dir / "kv_store_full_docs.json"
+        self._doc_status_file = self.data_dir / "kv_store_doc_status.json"
+        self._chunk_store_file = self.data_dir / "kv_store_text_chunks.json"
+        self._entity_chunks_file = self.data_dir / "kv_store_entity_chunks.json"
+        self._relation_chunks_file = self.data_dir / "kv_store_relation_chunks.json"
+        self._full_entities_file = self.data_dir / "kv_store_full_entities.json"
+        self._full_relations_file = self.data_dir / "kv_store_full_relations.json"
+        self._graphml_file = self.data_dir / "graph_chunk_entity_relation.graphml"
 
         logger.info(f"JSON 知识库存储初始化: {self.data_dir}")
 
@@ -70,25 +77,13 @@ class JSONKnowledgeStorage(IKnowledgeStorage):
 
     def get_entity_count(self) -> int:
         """获取实体数量"""
-        try:
-            import networkx as nx
-            if self._graphml_file.exists():
-                graph = nx.read_graphml(str(self._graphml_file))
-                return graph.number_of_nodes()
-        except Exception as e:
-            logger.error(f"读取图数据失败: {e}")
-        return 0
+        data = self._load_json_file(self._full_entities_file)
+        return len(data)
 
     def get_relation_count(self) -> int:
         """获取关系数量"""
-        try:
-            import networkx as nx
-            if self._graphml_file.exists():
-                graph = nx.read_graphml(str(self._graphml_file))
-                return graph.number_of_edges()
-        except Exception as e:
-            logger.error(f"读取图数据失败: {e}")
-        return 0
+        data = self._load_json_file(self._full_relations_file)
+        return len(data)
 
     def list_documents(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
@@ -168,3 +163,67 @@ class JSONKnowledgeStorage(IKnowledgeStorage):
         ]
 
         return matched[:limit]
+
+    def get_source_summary(self) -> str:
+        """
+        获取知识库来源摘要
+
+        用于RAG注入，让LLM能够回答"知识库包含什么"这类问题。
+
+        Returns:
+            格式化的文本描述
+        """
+        try:
+            from collections import Counter
+            import re
+
+            # 读取完整文档数据（包含source_url）
+            full_docs_data = self._load_json_file(self._full_docs_file)
+
+            if not full_docs_data:
+                return "当前知识库为空，尚未导入任何文档。"
+
+            # 统计来源
+            sources = Counter()
+            total_docs = 0
+
+            for doc_id, doc_data in full_docs_data.items():
+                if not isinstance(doc_data, dict):
+                    continue
+
+                total_docs += 1
+
+                # 获取source_url
+                source_url = doc_data.get("source_url", "")
+
+                if source_url and "github.com" in source_url:
+                    # 提取仓库名
+                    match = re.search(r'github\.com/([^/]+/[^/]+)', source_url)
+                    if match:
+                        repo = f"github.com/{match.group(1)}"
+                        sources[repo] += 1
+                elif source_url:
+                    # 非GitHub来源，使用域名
+                    try:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(source_url)
+                        domain = parsed.netloc
+                        if domain:
+                            sources[domain] += 1
+                    except Exception:
+                        sources[source_url[:50]] += 1
+
+            if not sources:
+                return f"当前知识库包含 {total_docs} 个文档，但缺少来源信息。"
+
+            # 生成自然语言描述
+            summary_parts = [f"当前知识库包含 {len(sources)} 个来源，共 {total_docs} 个文档：\n"]
+
+            for source, count in sources.most_common():
+                summary_parts.append(f"- {source} ({count} 个文档)")
+
+            return "\n".join(summary_parts)
+
+        except Exception as e:
+            logger.error(f"生成来源摘要失败: {e}")
+            return "无法获取知识库来源信息。"
