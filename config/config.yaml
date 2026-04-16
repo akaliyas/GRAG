@@ -164,7 +164,9 @@ lightrag:
     b: ${BM25_B:0.75}  # 控制文档长度归一化 (0.5-1.0)
     epsilon: ${BM25_EPSILON:0.25}  # 下界归一化参数
     # RRF (Reciprocal Rank Fusion) 参数
-    rrf_k: ${BM25_RRF_K:60}  # RRF 常数，用于融合向量检索和 BM25 结果
+    rrf_k: ${BM25_RRF_K:60}  # RRF 基础常数，用于融合向量检索和 BM25 结果
+    rrf_adaptive: ${BM25_RRF_ADAPTIVE:true}  # 是否启用自适应 RRF (默认 true)
+    rrf_strategy: ${BM25_RRF_STRATEGY:auto}  # 自适应策略: auto, conservative, aggressive, source_count, score_variance
 
 # 模型配置
 models:
