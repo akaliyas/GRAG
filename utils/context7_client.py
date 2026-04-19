@@ -119,24 +119,26 @@ class Context7Client:
     注意：这是辅助工具，不替代 GitHub API
     """
 
-    BASE_URL = "https://context7.com/api"
+    BASE_URL = "https://context7.com/api"  # 默认值，可通过环境变量覆盖
 
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 30.0):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, timeout: float = 30.0):
         """
         初始化 Context7 客户端
 
         Args:
             api_key: Context7 API Key（从环境变量 CONTEXT7_API_KEY 读取）
+            base_url: Context7 API 地址（从环境变量 CONTEXT7_BASE_URL 读取，默认使用类变量）
             timeout: HTTP 请求超时时间（秒）
         """
         self.api_key = api_key or os.getenv("CONTEXT7_API_KEY")
+        self.base_url = base_url or os.getenv("CONTEXT7_BASE_URL", self.BASE_URL)
         self.timeout = timeout
 
         if not self.api_key:
             logger.warning("CONTEXT7_API_KEY 未设置，Context7 功能将受限")
 
         self.client = httpx.Client(
-            base_url=self.BASE_URL,
+            base_url=self.base_url,
             headers=self._get_headers(),
             timeout=timeout
         )
