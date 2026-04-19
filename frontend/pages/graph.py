@@ -15,19 +15,12 @@ import networkx as nx
 import plotly.graph_objects as go
 from typing import Dict, List, Any, Optional
 
-# API 配置
-API_BASE_URL = "http://localhost:8000/api/v1"
+# 导入配置
+import sys
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-# 安全获取 secrets
-try:
-    API_USERNAME = st.secrets["API_USERNAME"]
-except (FileNotFoundError, KeyError):
-    API_USERNAME = "admin"
-
-try:
-    API_PASSWORD = st.secrets["API_PASSWORD"]
-except (FileNotFoundError, KeyError):
-    API_PASSWORD = ""
+from frontend.config import API_BASE_URL, API_USERNAME, API_PASSWORD
 
 logger = logging.getLogger(__name__)
 

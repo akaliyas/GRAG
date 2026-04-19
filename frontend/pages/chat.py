@@ -11,29 +11,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 
-# Import session manager
+# Import session manager and config
 import sys
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from frontend.storage.session_manager import FileSessionManager, generate_session_title
+from frontend.config import API_BASE_URL, API_USERNAME, API_PASSWORD
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# API 配置
-API_BASE_URL = "http://localhost:8000/api/v1"
-
-# 安全获取 secrets（避免 FileNotFoundError）
-try:
-    API_USERNAME = st.secrets["API_USERNAME"]
-except (FileNotFoundError, KeyError):
-    API_USERNAME = "admin"
-
-try:
-    API_PASSWORD = st.secrets["API_PASSWORD"]
-except (FileNotFoundError, KeyError):
-    API_PASSWORD = ""
 
 # Initialize session manager (文件系统存储，持久化)
 session_manager = FileSessionManager()
@@ -519,7 +506,7 @@ def query_api_stream(query: str):
     except requests.exceptions.Timeout:
         yield {"error": "请求超时，请稍后重试"}
     except requests.exceptions.ConnectionError:
-        yield {"error": "无法连接后端服务，请确认 API 已启动 (http://localhost:8000)"}
+        yield {"error": f"无法连接后端服务，请确认 API 已启动 ({API_BASE_URL})"}
     except Exception as e:
         yield {"error": str(e)}
 
