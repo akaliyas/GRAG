@@ -64,7 +64,7 @@ except ImportError:
 
 from config.config_manager import get_config
 from models.model_manager import ModelManager
-from utils.schema import CleanBatch, CleanDoc
+from utils.schema import CleanBatch, CleanDoc, BM25Document
 from knowledge.bm25_indexer import BM25Indexer, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,17 @@ class LightRAGWrapper:
             graph_storage = lightrag_config.get('graph_storage', 'NetworkXStorage')
             doc_status_storage = lightrag_config.get('doc_status_storage', 'JsonDocStatusStorage')
         
+        # 初始化持久化 event loop（避免多 loop 问题）
+        import asyncio
+        try:
+            self._event_loop = asyncio.get_event_loop()
+            if self._event_loop.is_closed():
+                raise RuntimeError("Existing event loop is closed")
+        except RuntimeError:
+            logger.info("为 LightRAG 创建新的持久化 event loop")
+            self._event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._event_loop)
+
         # 初始化 LightRAG
         self.rag = LightRAG(
             llm_model_func=llm_func,
@@ -622,22 +633,24 @@ class LightRAGWrapper:
             file_paths = []
             doc_ids = []
             metadata_list = []  # 用于后续 Update
-            
+
             for doc in batch.docs:
                 if not doc.content:
                     logger.warning(f"文档内容为空，跳过: {doc.file_path}")
                     continue
-                
+
                 texts.append(doc.content)
                 file_paths.append(doc.file_path)
                 doc_ids.append(doc.doc_id)
-                metadata_list.append({
-                    'doc_id': doc.doc_id,
-                    'metadata': doc.metadata,
-                    'source_url': doc.source_url,
-                    'file_path': doc.file_path,
-                    'file_type': doc.file_type
-                })
+                # 使用 BM25Document 协议确保类型安全
+                metadata_list.append(BM25Document(
+                    doc_id=doc.doc_id,
+                    content=doc.content,  # ✅ 添加 content 字段
+                    metadata=doc.metadata,
+                    source_url=doc.source_url,
+                    file_path=doc.file_path,
+                    file_type=doc.file_type
+                ))
             
             if not texts:
                 logger.warning("没有有效的文档内容")
@@ -698,6 +711,18 @@ class LightRAGWrapper:
             # Step 3: BM25 索引 - 如果启用，添加文档到 BM25 索引
             if self.bm25_indexer:
                 logger.info("开始更新 BM25 索引...")
+                # 调试：检查 metadata_list 类型
+                logger.debug(f"metadata_list 类型: {type(metadata_list)}")
+                logger.debug(f"metadata_list 长度: {len(metadata_list)}")
+                if len(metadata_list) > 0:
+                    first_item = metadata_list[0]
+                    logger.debug(f"第一个元素类型: {type(first_item)}")
+                    if isinstance(first_item, BM25Document):
+                        logger.debug(f"第一个元素 doc_id: {first_item.doc_id}")
+                        logger.debug(f"第一个元素 content 长度: {len(first_item.content)}")
+                    else:
+                        logger.debug(f"第一个元素内容: {first_item}")
+
                 bm25_count = self.bm25_indexer.add_documents(metadata_list)
                 self.bm25_indexer.save_index()
                 logger.info(f"✅ 成功添加 {bm25_count} 个文档到 BM25 索引")
@@ -721,7 +746,7 @@ class LightRAGWrapper:
                 'total_documents': 0
             }
     
-    def _update_metadata_batch(self, metadata_list: List[Dict[str, Any]]) -> int:
+    def _update_metadata_batch(self, metadata_list: List[BM25Document]) -> int:
         """
         批量更新 Metadata 到存储层
 
@@ -750,7 +775,7 @@ class LightRAGWrapper:
             traceback.print_exc()
             return 0
 
-    def _update_metadata_postgresql(self, metadata_list: List[Dict[str, Any]]) -> int:
+    def _update_metadata_postgresql(self, metadata_list: List[BM25Document]) -> int:
         """
         PostgreSQL 存储的 metadata 更新
 
@@ -773,13 +798,19 @@ class LightRAGWrapper:
                 updated_count = 0
 
                 for meta_info in metadata_list:
-                    doc_id = meta_info['doc_id']
+                    # 将 BM25Document 转换为字典（如果需要）
+                    if isinstance(meta_info, BM25Document):
+                        meta_dict = meta_info.model_dump()
+                    else:
+                        meta_dict = meta_info
+
+                    doc_id = meta_dict['doc_id']
                     # 构建完整的metadata对象
                     metadata_dict = {
-                        'source_url': meta_info.get('source_url', ''),
-                        'file_path': meta_info.get('file_path', ''),
-                        'file_type': meta_info.get('file_type', ''),
-                        **meta_info.get('metadata', {})
+                        'source_url': meta_dict.get('source_url', ''),
+                        'file_path': meta_dict.get('file_path', ''),
+                        'file_type': meta_dict.get('file_type', ''),
+                        **meta_dict.get('metadata', {})
                     }
                     metadata_json = json.dumps(metadata_dict, ensure_ascii=False)
 
@@ -814,7 +845,7 @@ class LightRAGWrapper:
             logger.error(f"PostgreSQL metadata 更新失败: {e}")
             return 0
 
-    def _update_metadata_json(self, metadata_list: List[Dict[str, Any]]) -> int:
+    def _update_metadata_json(self, metadata_list: List[BM25Document]) -> int:
         """
         JSON 存储的 metadata 更新
 
@@ -844,21 +875,27 @@ class LightRAGWrapper:
             # 更新每个文档的metadata
             updated_count = 0
             for meta_info in metadata_list:
-                doc_id = meta_info['doc_id']
+                # 将 BM25Document 转换为字典（如果需要）
+                if isinstance(meta_info, BM25Document):
+                    meta_dict = meta_info.model_dump()
+                else:
+                    meta_dict = meta_info
+
+                doc_id = meta_dict['doc_id']
 
                 if doc_id not in full_docs:
                     logger.debug(f"文档不存在于 kv_store_full_docs: {doc_id}")
                     continue
 
                 # 构建完整的文档信息
-                full_docs[doc_id]['source_url'] = meta_info.get('source_url', '')
-                full_docs[doc_id]['file_path'] = meta_info.get('file_path', '')
-                full_docs[doc_id]['file_type'] = meta_info.get('file_type', '')
+                full_docs[doc_id]['source_url'] = meta_dict.get('source_url', '')
+                full_docs[doc_id]['file_path'] = meta_dict.get('file_path', '')
+                full_docs[doc_id]['file_type'] = meta_dict.get('file_type', '')
 
                 # 合并metadata
                 if 'metadata' not in full_docs[doc_id]:
                     full_docs[doc_id]['metadata'] = {}
-                full_docs[doc_id]['metadata'].update(meta_info.get('metadata', {}))
+                full_docs[doc_id]['metadata'].update(meta_dict.get('metadata', {}))
 
                 updated_count += 1
 
@@ -1063,11 +1100,24 @@ class LightRAGWrapper:
         Returns:
             查询结果字典
         """
+        # 支持 force_mode 覆盖（用于消融实验）
+        actual_mode = getattr(self, '_force_mode', mode)
+
         # 构建查询参数
         query_param = QueryParam(
-            mode=mode,
+            mode=actual_mode,
             top_k=top_k
         )
+
+        # 确保 event loop 正确设置（避免 asyncio.Lock 绑定问题）
+        import asyncio
+        try:
+            current_loop = asyncio.get_running_loop()
+            # 如果已经在异步上下文中，直接使用
+            pass
+        except RuntimeError:
+            # 没有运行中的 loop，设置我们的持久化 loop
+            asyncio.set_event_loop(self._event_loop)
 
         # 1. 获取答案（使用 query 方法）
         answer_result = self.rag.query(query, query_param)

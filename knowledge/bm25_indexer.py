@@ -12,6 +12,8 @@ from rank_bm25 import BM25Okapi
 import jieba
 import jieba.analyse
 
+from utils.schema import BM25Document
+
 logger = logging.getLogger(__name__)
 
 
@@ -101,25 +103,26 @@ class BM25Indexer:
         }
         return stopwords
 
-    def add_documents(self, documents: List[Dict[str, Any]]) -> int:
+    def add_documents(self, documents: List[BM25Document]) -> int:
         """
         添加文档到索引
 
         Args:
-            documents: 文档列表，每个文档包含 content 和 doc_id
+            documents: BM25Document 协议文档列表，类型安全
 
         Returns:
             成功添加的文档数量
         """
         added_count = 0
 
-        for doc in documents:
-            doc_id = doc.get('doc_id') or doc.get('id', '')
-            content = doc.get('content', '')
+        logger.debug(f"BM25Indexer.add_documents: 接收到 {len(documents)} 个文档")
+        logger.debug(f"BM25Indexer.add_documents: 当前已有 {len(self.doc_ids)} 个文档")
 
-            if not doc_id or not content:
-                logger.warning(f"文档缺少 doc_id 或 content，跳过")
-                continue
+        for doc in documents:
+            doc_id = doc.doc_id
+            content = doc.content
+
+            logger.debug(f"处理文档: doc_id={doc_id}, content长度={len(content)}")
 
             # 检查是否已存在
             if doc_id in self.doc_ids:
@@ -128,17 +131,20 @@ class BM25Indexer:
 
             # 分词
             tokens = self._tokenize(content)
+            logger.debug(f"分词结果: {len(tokens)} 个 tokens, 类型: {type(tokens)}")
 
             if not tokens:
                 logger.warning(f"文档分词结果为空，跳过: {doc_id}")
                 continue
 
             # 添加到索引
-            self.documents.append(doc)
+            self.documents.append(doc.model_dump())
             self.doc_ids.append(doc_id)
             self.tokenized_docs.append(tokens)
 
             added_count += 1
+
+        logger.debug(f"准备重建索引: added_count={added_count}, tokenized_docs数量={len(self.tokenized_docs)}")
 
         # 重建 BM25 索引
         if added_count > 0:
@@ -154,6 +160,19 @@ class BM25Indexer:
             return
 
         try:
+            # 验证 tokenized_docs 格式
+            if not isinstance(self.tokenized_docs, list):
+                logger.error(f"tokenized_docs 类型错误: {type(self.tokenized_docs)}")
+                return
+
+            for i, doc in enumerate(self.tokenized_docs[:3]):  # 检查前3个
+                if not isinstance(doc, list):
+                    logger.error(f"tokenized_docs[{i}] 类型错误: {type(doc)}, 内容: {doc}")
+                    return
+                if not all(isinstance(token, str) for token in doc[:5]):  # 检查前5个token
+                    logger.error(f"tokenized_docs[{i}] 包含非字符串token")
+                    return
+
             self.bm25 = BM25Okapi(
                 self.tokenized_docs,
                 k1=self.k1,
@@ -271,6 +290,19 @@ class BM25Indexer:
             self.documents = meta.get('documents', [])
             self.tokenized_docs = meta.get('tokenized_docs', [])
             self.doc_ids = meta.get('doc_ids', [])
+
+            # 恢复参数值（修复增量更新兼容性 bug）
+            # 确保类型正确，防止旧版本数据类型错误
+            saved_k1 = meta.get('k1', self.k1)
+            saved_b = meta.get('b', self.b)
+            saved_epsilon = meta.get('epsilon', self.epsilon)
+
+            # 类型验证和转换
+            self.k1 = float(saved_k1) if saved_k1 is not None else self.k1
+            self.b = float(saved_b) if saved_b is not None else self.b
+            self.epsilon = float(saved_epsilon) if saved_epsilon is not None else self.epsilon
+
+            logger.debug(f"从元数据恢复参数: k1={self.k1}, b={self.b}, epsilon={self.epsilon}")
 
             # 加载 BM25 索引
             with open(self.index_file, 'rb') as f:
