@@ -1,7 +1,7 @@
 """
 故障排查测试
 
-测试OpenClaw故障排查相关的场景。
+测试Kubernetes故障排查相关的场景。
 """
 import json
 from pathlib import Path
@@ -15,9 +15,11 @@ class TroubleshootingTest(BenchmarkTest):
 
     def get_scenarios(self) -> List[Dict[str, Any]]:
         """获取故障排查测试场景"""
-        scenarios_file = Path(__file__).parent / "scenarios" / "openclaw_scenarios.json"
+        scenarios_file = Path(__file__).parent / "scenarios" / "kubernetes_scenarios.json"
 
         with open(scenarios_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        return data.get("scenarios", [])
+        # 过滤出 troubleshooting 类别的场景
+        all_scenarios = data.get("scenarios", [])
+        return [s for s in all_scenarios if s.get("category") == "troubleshooting"]

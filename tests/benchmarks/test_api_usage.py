@@ -1,7 +1,7 @@
 """
 API使用测试
 
-测试Docker API相关的场景。
+测试Kubernetes API相关的场景。
 """
 import json
 from pathlib import Path
@@ -15,9 +15,11 @@ class APIUsageTest(BenchmarkTest):
 
     def get_scenarios(self) -> List[Dict[str, Any]]:
         """获取API使用测试场景"""
-        scenarios_file = Path(__file__).parent / "scenarios" / "docker_scenarios.json"
+        scenarios_file = Path(__file__).parent / "scenarios" / "kubernetes_scenarios.json"
 
         with open(scenarios_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        return data.get("scenarios", [])
+        # 过滤出 api_usage 类别的场景
+        all_scenarios = data.get("scenarios", [])
+        return [s for s in all_scenarios if s.get("category") == "api_usage"]

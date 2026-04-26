@@ -9,7 +9,11 @@
       "title": "创建Nginx Deployment",
       "description": "用户需要在Kubernetes集群中部署一个简单的Nginx应用",
       "user_query": "如何在Kubernetes中部署Nginx应用？",
-      "expected_topics": ["Deployment", "kubectl apply", "容器镜像"],
+      "expected_topics": [
+        "Deployment",
+        "kubectl apply",
+        "容器镜像"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -24,7 +28,11 @@
       "title": "创建Service暴露应用",
       "description": "用户创建的Deployment需要通过Service暴露给外部访问",
       "user_query": "如何创建Service来暴露Kubernetes中的应用？",
-      "expected_topics": ["Service", "端口", "类型"],
+      "expected_topics": [
+        "Service",
+        "端口",
+        "类型"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -39,7 +47,11 @@
       "title": "使用ConfigMap配置应用",
       "description": "用户需要将配置信息传递给应用，而不需要重新构建镜像",
       "user_query": "如何使用ConfigMap在Kubernetes中配置应用？",
-      "expected_topics": ["ConfigMap", "环境变量", "配置文件"],
+      "expected_topics": [
+        "ConfigMap",
+        "环境变量",
+        "配置文件"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -54,7 +66,11 @@
       "title": "配置HPA实现自动扩缩容",
       "description": "用户的应用需要根据CPU使用率自动扩展Pod数量",
       "user_query": "如何配置Horizontal Pod Autoscaler实现应用自动扩缩容？",
-      "expected_topics": ["HPA", "CPU", "自动扩缩容"],
+      "expected_topics": [
+        "HPA",
+        "CPU",
+        "自动扩缩容"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -69,7 +85,11 @@
       "title": "配置Ingress路由规则",
       "description": "用户需要配置Ingress来实现基于域名的路由",
       "user_query": "如何配置Kubernetes Ingress实现HTTP路由？",
-      "expected_topics": ["Ingress", "路由", "域名"],
+      "expected_topics": [
+        "Ingress",
+        "路由",
+        "域名"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -84,7 +104,11 @@
       "title": "使用PersistentVolume存储数据",
       "description": "用户的有状态应用需要持久化存储",
       "user_query": "如何为Kubernetes应用配置持久化存储？",
-      "expected_topics": ["PersistentVolume", "PersistentVolumeClaim", "存储"],
+      "expected_topics": [
+        "PersistentVolume",
+        "PersistentVolumeClaim",
+        "存储"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -99,7 +123,11 @@
       "title": "配置StatefulSet部署有状态应用",
       "description": "用户需要部署一个需要稳定网络标识和持久化存储的数据库",
       "user_query": "如何使用StatefulSet在Kubernetes中部署有状态应用？",
-      "expected_topics": ["StatefulSet", "稳定标识", "有序部署"],
+      "expected_topics": [
+        "StatefulSet",
+        "稳定标识",
+        "有序部署"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -114,7 +142,11 @@
       "title": "配置DaemonSet在所有节点运行",
       "description": "用户需要在集群的每个节点上运行日志收集代理",
       "user_query": "如何使用DaemonSet确保Pod在每个节点上运行？",
-      "expected_topics": ["DaemonSet", "节点", "日志收集"],
+      "expected_topics": [
+        "DaemonSet",
+        "节点",
+        "日志收集"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,
@@ -129,7 +161,130 @@
       "title": "创建和使用Helm Chart",
       "description": "用户需要打包复杂的Kubernetes应用为Chart以便复用",
       "user_query": "如何创建Helm Chart来管理复杂的Kubernetes应用？",
-      "expected_topics": ["Helm", "Chart", "模板化"],
+      "expected_topics": [
+        "Helm",
+        "Chart",
+        "模板化"
+      ],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-api-001",
+      "category": "api_usage",
+      "difficulty": "basic",
+      "title": "访问 Kubernetes API",
+      "description": "开发者需要通过编程方式访问 Kubernetes API",
+      "user_query": "如何从应用程序访问 Kubernetes API？",
+      "expected_topics": [
+        "API 服务器",
+        "服务账户",
+        "RBAC",
+        "认证"
+      ],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-api-002",
+      "category": "api_usage",
+      "difficulty": "basic",
+      "title": "使用 kubectl 命令行工具",
+      "description": "管理员需要使用 kubectl 管理 Kubernetes 集群",
+      "user_query": "如何使用 kubectl 管理 Kubernetes 资源？",
+      "expected_topics": [
+        "kubectl",
+        "命令行",
+        "资源管理"
+      ],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": false
+      }
+    },
+    {
+      "scenario_id": "k8s-api-003",
+      "category": "api_usage",
+      "difficulty": "intermediate",
+      "title": "配置 Resource Quota",
+      "description": "集群管理员需要为命名空间配置资源配额",
+      "user_query": "如何为 Kubernetes 命名空间配置资源配额？",
+      "expected_topics": [
+        "ResourceQuota",
+        "LimitRange",
+        "命名空间",
+        "资源限制"
+      ],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-trouble-001",
+      "category": "troubleshooting",
+      "difficulty": "intermediate",
+      "title": "排查 CNI 插件错误",
+      "description": "集群管理员在迁移后遇到 CNI 插件相关问题",
+      "user_query": "如何排查和解决 Kubernetes CNI 插件相关错误？",
+      "expected_topics": [
+        "CNI",
+        "插件错误",
+        "容器运行时",
+        "故障排查"
+      ],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-trouble-002",
+      "category": "troubleshooting",
+      "difficulty": "intermediate",
+      "title": "调试 DNS 解析问题",
+      "description": "应用无法解析服务名称，需要排查 DNS 配置",
+      "user_query": "如何排查 Kubernetes 集群中的 DNS 解析问题？",
+      "expected_topics": [
+        "DNS",
+        "CoreDNS",
+        "服务发现",
+        "网络调试"
+      ],
+      "min_citations": 1,
+      "quality_criteria": {
+        "contains_command": true,
+        "contains_example": true,
+        "mentions_prerequisites": true
+      }
+    },
+    {
+      "scenario_id": "k8s-trouble-003",
+      "category": "troubleshooting",
+      "difficulty": "advanced",
+      "title": "诊断 Pod 启动失败",
+      "description": "Pod 一直处于 CrashLoopBackOff 或 Pending 状态",
+      "user_query": "如何诊断和修复 Pod 启动失败问题？",
+      "expected_topics": [
+        "Pod",
+        "kubectl logs",
+        "kubectl describe",
+        "调试"
+      ],
       "min_citations": 1,
       "quality_criteria": {
         "contains_command": true,

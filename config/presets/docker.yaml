@@ -4,20 +4,20 @@
 
 # 存储配置
 storage:
-  # 缓存存储（使用 PostgreSQL）
+  # 缓存存储（Docker 环境默认使用 JSON，可配置 PostgreSQL）
   cache_storage:
-    backend: postgresql
-    # 数据库配置从 docker-compose.yml 环境变量注入
+    backend: json  # 设置为 postgresql 启用数据库存储
+    cache_dir: ./data/cache
 
-  # 图存储（使用 Neo4j）
+  # 图存储（Docker 环境默认使用 JSON，可配置 Neo4j）
   graph_storage:
-    backend: neo4j
-    # Neo4j 配置从 docker-compose.yml 环境变量注入
+    backend: json  # 设置为 neo4j 启用图数据库
+    data_dir: ./rag_storage
 
   # 知识库存储（LightRAG）
   knowledge_storage:
-    backend: postgresql
-    # 数据库配置从 docker-compose.yml 环境变量注入
+    backend: json
+    data_dir: ./rag_storage
 
 # 数据库配置（从环境变量读取）
 database:
@@ -47,30 +47,30 @@ lightrag:
   embedding_api_key: ${EMBEDDING_API_KEY}
   embedding_base_url: https://api.siliconflow.cn/v1
 
-  # 数据库存储模式
-  storage_type: postgresql
+  # 存储模式（Docker 环境默认使用文件存储）
+  storage_type: file  # 设置为 postgresql 启用数据库存储
 
-  # 数据库存储后端
-  kv_storage: PGKVStorage
-  vector_storage: PGVectorStorage
-  graph_storage: Neo4JStorage
-  doc_status_storage: PGDocStatusStorage
+  # 如启用数据库模式，取消以下注释
+  # kv_storage: PGKVStorage
+  # vector_storage: PGVectorStorage
+  # graph_storage: Neo4JStorage
+  # doc_status_storage: PGDocStatusStorage
 
 # 特性开关
 features:
   requires_docker: true
-  local_filesystem: false
-  graph_visualization: true  # 支持 Neo4j 图导出
+  local_filesystem: true  # Docker 内使用文件系统存储
+  graph_visualization: true
 
 # 部署信息
 deployment:
   mode: docker
-  description: "Docker 部署 - 需要 PostgreSQL + Neo4j"
+  description: "Docker 容器化部署 - 支持多种存储后端"
   requirements:
     - Docker
     - Docker Compose
   services:
-    - postgres
-    - neo4j
-    - api
-    - frontend
+    - api  # 必需
+    - frontend  # 必需
+    - postgres  # 可选（用于 PostgreSQL 存储模式）
+    - neo4j  # 可选（用于 Neo4j 存储模式）
