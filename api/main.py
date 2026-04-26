@@ -126,6 +126,7 @@ async def startup_event():
         cache_storage = storage_factory.create_cache_storage()
         cache_manager = CacheManager(cache_storage=cache_storage)
         logger.info(f"缓存管理器初始化完成，存储后端: {type(cache_storage).__name__}")
+        app.state.cache_manager = cache_manager
 
         # 初始化全局依赖
         init_dependencies(agent, cache_manager, model_manager)
@@ -144,9 +145,12 @@ async def shutdown_event():
 
     try:
         # 关闭缓存管理器
-        cache_manager = CacheManager()
-        cache_manager.shutdown()
-        logger.info("缓存管理器已关闭")
+        cache_manager = getattr(app.state, "cache_manager", None)
+        if cache_manager is not None:
+            cache_manager.shutdown()
+            logger.info("缓存管理器已关闭")
+        else:
+            logger.warning("未找到启动期注入的缓存管理器实例，跳过缓存关闭")
 
         # 保存指标
         from utils.monitoring import get_metrics_collector

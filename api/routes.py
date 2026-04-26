@@ -36,6 +36,16 @@ _cache_manager: Optional[CacheManager] = None
 _model_manager: Optional[ModelManager] = None
 
 
+def _safe_model_type(model_manager: Optional[ModelManager]) -> str:
+    """安全获取当前模型类型，避免错误处理路径二次失败。"""
+    try:
+        if model_manager is None:
+            return "unknown"
+        return model_manager.get_current_model_type()
+    except Exception:
+        return "unknown"
+
+
 def get_agent() -> GRAGAgent:
     """获取 Agent 实例"""
     global _agent
@@ -87,18 +97,22 @@ def query(
     try:
         # 检查缓存
         if request.use_cache:
-            cached_result = cache_manager.get_cache(request.query)
-            if cached_result:
-                logger.info(f"缓存命中: {request.query[:50]}...")
-                return QueryResponse(
-                    success=True,
-                    answer=cached_result['answer'],
-                    context_ids=cached_result.get('context_ids', []),
-                    context_metadata=cached_result.get('context_metadata', []),  # 新增
-                    response_time=time.time() - start_time,
-                    model_type=cached_result.get('model_type', 'unknown'),
-                    from_cache=True
-                )
+            try:
+                cached_result = cache_manager.get_cache(request.query)
+                if cached_result:
+                    logger.info(f"缓存命中: {request.query[:50]}...")
+                    return QueryResponse(
+                        success=True,
+                        answer=cached_result['answer'],
+                        context_ids=cached_result.get('context_ids', []),
+                        context_metadata=cached_result.get('context_metadata', []),  # 新增
+                        response_time=time.time() - start_time,
+                        model_type=cached_result.get('model_type', 'unknown'),
+                        from_cache=True
+                    )
+            except Exception as cache_error:
+                # 对齐 UC-01 异常分支：缓存异常不阻断主查询路径
+                logger.warning(f"缓存读取失败，降级到实时查询: {cache_error}")
 
         # 执行查询
         result = agent.query(request.query, stream=request.stream)
@@ -108,22 +122,26 @@ def query(
                 success=False,
                 answer="",
                 response_time=time.time() - start_time,
-                model_type=model_manager.get_current_model_type(),
-                error=result.get("error", "查询失败")
+                model_type=_safe_model_type(model_manager),
+                error=result.get("error", "查询失败，请稍后重试或重述问题")
             )
 
         response_time = time.time() - start_time
 
-        # 保存到缓存
+        # 保存到待定缓存（等待用户反馈）
         if request.use_cache:
-            cache_manager.set_cache(
-                query=request.query,
-                answer=result["answer"],
-                context_ids=result.get("context_ids", []),
-                model_type=model_manager.get_current_model_type(),
-                response_time=response_time,
-                context_metadata=result.get("context_metadata", [])  # 新增
-            )
+            try:
+                cache_manager.set_pending_cache(
+                    query=request.query,
+                    answer=result["answer"],
+                    context_ids=result.get("context_ids", []),
+                    model_type=_safe_model_type(model_manager),
+                    response_time=response_time,
+                    context_metadata=result.get("context_metadata", [])
+                )
+            except Exception as cache_error:
+                # 对齐 UC-01 异常分支：缓存写入失败不影响主流程返回
+                logger.warning(f"待定缓存写入失败，继续返回查询结果: {cache_error}")
 
         # 记录指标
         collector = get_metrics_collector()
@@ -134,15 +152,36 @@ def query(
             answer=result["answer"],
             context_ids=result.get("context_ids", []),
             response_time=response_time,
-            model_type=model_manager.get_current_model_type(),
+            model_type=_safe_model_type(model_manager),
             from_cache=False,
             citations=result.get("citations", []),
             citation_info=result.get("citation_info"),
             context_metadata=result.get("context_metadata", [])
         )
-    
+    except ValueError as e:
+        logger.warning(f"查询参数错误: {e}")
+        collector = get_metrics_collector()
+        collector.record_api_call("query", time.time() - start_time, success=False)
+        return QueryResponse(
+            success=False,
+            answer="",
+            response_time=time.time() - start_time,
+            model_type=_safe_model_type(model_manager),
+            error=f"请求参数不合法: {str(e)}"
+        )
+    except ConnectionError as e:
+        logger.error(f"查询依赖连接失败: {e}")
+        collector = get_metrics_collector()
+        collector.record_api_call("query", time.time() - start_time, success=False)
+        return QueryResponse(
+            success=False,
+            answer="",
+            response_time=time.time() - start_time,
+            model_type=_safe_model_type(model_manager),
+            error="服务暂时不可用，请稍后重试"
+        )
     except Exception as e:
-        logger.error(f"查询失败: {e}")
+        logger.exception(f"查询失败: {e}")
         collector = get_metrics_collector()
         collector.record_api_call("query", time.time() - start_time, success=False)
         
@@ -150,8 +189,8 @@ def query(
             success=False,
             answer="",
             response_time=time.time() - start_time,
-            model_type=model_manager.get_current_model_type(),
-            error=str(e)
+            model_type=_safe_model_type(model_manager),
+            error="内部错误：查询处理失败"
         )
 
 
@@ -212,6 +251,7 @@ async def query_stream(
                         "done": True,
                         "full_answer": answer,
                         "context_ids": cached_result.get('context_ids', []),
+                        "context_metadata": cached_result.get('context_metadata', []),
                         "response_time": time.time() - start_time,
                         "model_type": cached_result.get('model_type', 'unknown'),
                         "from_cache": True,
@@ -225,28 +265,55 @@ async def query_stream(
             async for chunk in agent.process_query_stream(request.query):
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
-                # 如果是最后一个 chunk，保存到缓存
+                # 如果是最后一个 chunk，保存到待定缓存（等待用户反馈）
                 if chunk.get("done"):
                     if request.use_cache:
-                        cache_manager.set_cache(
-                            query=request.query,
-                            answer=chunk.get("full_answer", ""),
-                            context_ids=chunk.get("context_ids", []),
-                            model_type=chunk.get("model_type", model_manager.get_current_model_type()),
-                            response_time=chunk.get("response_time", time.time() - start_time)
-                        )
+                        try:
+                            cache_manager.set_pending_cache(
+                                query=request.query,
+                                answer=chunk.get("full_answer", ""),
+                                context_ids=chunk.get("context_ids", []),
+                                model_type=chunk.get("model_type", _safe_model_type(model_manager)),
+                                response_time=chunk.get("response_time", time.time() - start_time),
+                                context_metadata=chunk.get("context_metadata", [])
+                            )
+                        except Exception as cache_error:
+                            # 对齐 UC-01：缓存失败不打断流式返回
+                            logger.warning(f"待定缓存写入失败: {cache_error}")
 
                     # 记录指标
                     collector = get_metrics_collector()
                     response_time = chunk.get("response_time", time.time() - start_time)
                     collector.record_api_call("query_stream", response_time, success=True)
 
-        except Exception as e:
-            logger.error(f"流式查询失败: {e}")
+        except ValueError as e:
+            logger.warning(f"流式查询参数错误: {e}")
             error_chunk = {
                 "content": "",
                 "done": True,
-                "error": str(e)
+                "error": f"请求参数不合法: {str(e)}"
+            }
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+            collector = get_metrics_collector()
+            collector.record_api_call("query_stream", time.time() - start_time, success=False)
+        except ConnectionError as e:
+            logger.error(f"流式查询依赖连接失败: {e}")
+            error_chunk = {
+                "content": "",
+                "done": True,
+                "error": "服务暂时不可用，请稍后重试"
+            }
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+            collector = get_metrics_collector()
+            collector.record_api_call("query_stream", time.time() - start_time, success=False)
+        except Exception as e:
+            logger.exception(f"流式查询失败: {e}")
+            error_chunk = {
+                "content": "",
+                "done": True,
+                "error": "内部错误：流式查询失败"
             }
             yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
 
@@ -276,18 +343,25 @@ def feedback(
         反馈响应
     """
     try:
-        cache_manager.update_feedback(request.query, request.is_positive)
-        
+        updated = cache_manager.update_feedback(request.query, request.is_positive)
         feedback_type = "正面" if request.is_positive else "负面"
+        if not updated:
+            # 对齐 UC-02 A1：缓存不存在时也返回成功，但明确“仅记录事件”
+            logger.info("反馈事件已记录，但未命中缓存条目")
+            return FeedbackResponse(
+                success=True,
+                message=f"反馈已记录（{feedback_type}），但未命中历史缓存条目"
+            )
+
         return FeedbackResponse(
             success=True,
             message=f"反馈已记录（{feedback_type}）"
         )
     except Exception as e:
-        logger.error(f"反馈处理失败: {e}")
+        logger.exception(f"反馈处理失败: {e}")
         return FeedbackResponse(
             success=False,
-            message=f"反馈处理失败: {str(e)}"
+            message="反馈处理失败，请稍后重试"
         )
 
 
