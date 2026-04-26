@@ -149,6 +149,7 @@ class JSONCacheStorage(ICacheStorage):
                 return {
                     "answer": entry.get("answer", ""),
                     "context_ids": entry.get("context_ids", []),
+                    "context_metadata": entry.get("context_metadata", []),
                     "model_type": entry.get("model_type", "unknown"),
                     "response_time": entry.get("response_time", 0),
                     "created_at": entry.get("created_at"),
@@ -165,7 +166,8 @@ class JSONCacheStorage(ICacheStorage):
         answer: str,
         context_ids: List[str],
         model_type: str,
-        response_time: float
+        response_time: float,
+        context_metadata: Optional[List[Dict[str, Any]]] = None
     ) -> bool:
         """设置查询缓存"""
         with self._lock:
@@ -181,6 +183,7 @@ class JSONCacheStorage(ICacheStorage):
                     "query_hash": query_hash,
                     "answer": answer,
                     "context_ids": context_ids,
+                    "context_metadata": context_metadata or [],
                     "model_type": model_type,
                     "response_time": response_time,
                     "created_at": cache_data.get(query_hash, {}).get("created_at", now),

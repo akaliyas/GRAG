@@ -41,7 +41,8 @@ class ICacheStorage(ABC):
         answer: str,
         context_ids: List[str],
         model_type: str,
-        response_time: float
+        response_time: float,
+        context_metadata: Optional[List[Dict[str, Any]]] = None
     ) -> bool:
         """
         设置查询缓存
@@ -52,6 +53,7 @@ class ICacheStorage(ABC):
             context_ids: 上下文 ID 列表
             model_type: 模型类型
             response_time: 响应时间（秒）
+            context_metadata: 完整上下文元数据（可选）
 
         Returns:
             设置成功返回 True，失败返回 False

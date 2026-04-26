@@ -117,15 +117,23 @@ class StorageFactory:
             return JSONCacheStorage(cache_dir=config.get('cache_dir', './data/cache'))
 
         elif backend == StorageBackend.POSTGRESQL or backend == 'postgresql':
-            from storage.postgres_cache_storage import PostgreSQLCacheStorage
-            db_config = self.config.get('database', {}).get('postgresql', {})
-            return PostgreSQLCacheStorage(
-                host=db_config.get('host', 'localhost'),
-                port=db_config.get('port', 5432),
-                database=db_config.get('database', 'grag_db'),
-                user=db_config.get('user', 'grag_user'),
-                password=db_config.get('password', '')
-            )
+            try:
+                from storage.postgres_cache_storage import PostgreSQLCacheStorage
+                db_config = self.config.get('database', {}).get('postgresql', {})
+                return PostgreSQLCacheStorage(
+                    host=db_config.get('host', 'localhost'),
+                    port=db_config.get('port', 5432),
+                    database=db_config.get('database', 'grag_db'),
+                    user=db_config.get('user', 'grag_user'),
+                    password=db_config.get('password', '')
+                )
+            except ImportError:
+                logger.warning(
+                    "PostgreSQL 存储实现不可用，回退到 JSON 存储。"
+                    "要启用 PostgreSQL，请实现 storage/postgres_cache_storage.py"
+                )
+                from storage.json_cache_storage import JSONCacheStorage
+                return JSONCacheStorage(cache_dir=config.get('cache_dir', './data/cache'))
 
         elif backend == 'redis':
             from storage.redis_cache_storage import RedisCacheStorage
@@ -153,13 +161,21 @@ class StorageFactory:
         logger.info(f"创建图存储: {backend}")
 
         if backend == StorageBackend.NEO4J or backend == 'neo4j':
-            from storage.neo4j_graph_storage import Neo4jGraphStorage
-            db_config = self.config.get('database', {}).get('neo4j', {})
-            return Neo4jGraphStorage(
-                uri=db_config.get('uri', 'neo4j://localhost:7687'),
-                username=db_config.get('username', 'neo4j'),
-                password=db_config.get('password', 'neo4j_password')
-            )
+            try:
+                from storage.neo4j_graph_storage import Neo4jGraphStorage
+                db_config = self.config.get('database', {}).get('neo4j', {})
+                return Neo4jGraphStorage(
+                    uri=db_config.get('uri', 'neo4j://localhost:7687'),
+                    username=db_config.get('username', 'neo4j'),
+                    password=db_config.get('password', 'neo4j_password')
+                )
+            except ImportError:
+                logger.warning(
+                    "Neo4j 存储实现不可用，回退到 JSON 存储。"
+                    "要启用 Neo4j，请实现 storage/neo4j_graph_storage.py"
+                )
+                from storage.json_graph_storage import JSONGraphStorage
+                return JSONGraphStorage(data_dir=config.get('data_dir', './rag_storage'))
 
         elif backend == StorageBackend.JSON or backend == 'json':
             from storage.json_graph_storage import JSONGraphStorage

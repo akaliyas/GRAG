@@ -60,10 +60,16 @@ class CacheManager:
     1. 依赖注入模式：传入 ICacheStorage 实现类
     2. 兼容模式：直接使用 PostgreSQL（向后兼容）
 
+    改进：添加待定缓存机制，仅在收到 positive 反馈后才正式缓存。
+
     Attributes:
         cache_storage: 缓存存储实例（实现 ICacheStorage 接口）
         _use_injection: 是否使用依赖注入模式
+        _pending_cache: 待定缓存（等待用户反馈的响应）
     """
+
+    # 待定缓存 TTL（秒），超过此时间未收到反馈则清理
+    PENDING_CACHE_TTL = 3600  # 1小时
 
     def __init__(self, cache_storage: Optional[ICacheStorage] = None):
         """
@@ -94,6 +100,13 @@ class CacheManager:
         self.cleanup_batch_size = cache_config.get('lru', {}).get('cleanup_batch_size', 100)
         self.low_threshold = cache_config.get('quality', {}).get('low_threshold', 0.3)
         self.high_threshold = cache_config.get('quality', {}).get('high_threshold', 0.7)
+
+        # 待定缓存：等待用户反馈的响应
+        # 格式：{query_hash: {"query": str, "answer": str, "context_ids": List[str],
+        #                     "model_type": str, "response_time": float,
+        #                     "context_metadata": List[Dict], "created_at": float}}
+        self._pending_cache: Dict[str, Dict[str, Any]] = {}
+        self._pending_lock = threading.Lock()
 
         # 启动定时清理任务
         self._cleanup_thread = None
@@ -129,6 +142,7 @@ class CacheManager:
             while not self._stop_cleanup:
                 try:
                     self.cleanup_lru()
+                    self._cleanup_expired_pending()  # 清理过期待定缓存
                     time.sleep(self.cleanup_interval)
                 except Exception as e:
                     logger.error(f"LRU 清理任务出错: {e}")
@@ -227,7 +241,7 @@ class CacheManager:
             )
         else:
             # 兼容模式：使用 PostgreSQL
-            self._set_cache_postgresql(query, answer, context_ids, model_type, response_time, context_metadata)
+            return self._set_cache_postgresql(query, answer, context_ids, model_type, response_time, context_metadata)
 
     def _set_cache_postgresql(
         self,
@@ -237,7 +251,7 @@ class CacheManager:
         model_type: str,
         response_time: float,
         context_metadata: Optional[List[Dict]] = None  # 新增参数
-    ):
+    ) -> bool:
         """PostgreSQL 模式：设置缓存
 
         改进：添加 context_metadata 字段存储。
@@ -274,28 +288,168 @@ class CacheManager:
 
             session.commit()
             logger.debug(f"缓存已保存: {query_hash[:8]}...")
+            return True
         except Exception as e:
             logger.error(f"保存缓存失败: {e}")
             session.rollback()
+            return False
         finally:
             session.close()
 
-    def update_feedback(self, query: str, is_positive: bool):
+    # ==================== 待定缓存管理（仅在 positive 反馈后正式缓存） ====================
+
+    def set_pending_cache(
+        self,
+        query: str,
+        answer: str,
+        context_ids: List[str],
+        model_type: str,
+        response_time: float,
+        context_metadata: Optional[List[Dict]] = None
+    ) -> bool:
+        """
+        设置待定缓存（等待用户反馈）
+
+        只有在收到 positive 反馈后才会移到正式缓存。
+        用于实现"仅在收到 positive 反馈时才缓存"的需求。
+
+        Args:
+            query: 查询文本
+            answer: 生成的答案
+            context_ids: 关联的文档/实体ID列表
+            model_type: 使用的模型类型
+            response_time: 响应时间（秒）
+            context_metadata: 完整的上下文元数据（可选）
+
+        Returns:
+            是否成功设置待定缓存
+        """
+        query_hash = self._hash_query(query)
+
+        with self._pending_lock:
+            self._pending_cache[query_hash] = {
+                "query": query,
+                "answer": answer,
+                "context_ids": context_ids,
+                "model_type": model_type,
+                "response_time": response_time,
+                "context_metadata": context_metadata or [],
+                "created_at": time.time()
+            }
+
+        logger.debug(f"待定缓存已设置: {query_hash[:8]}...")
+        return True
+
+    def confirm_cache(self, query: str) -> bool:
+        """
+        确认缓存（收到 positive 反馈后调用）
+
+        将待定缓存移到正式缓存中。
+
+        Args:
+            query: 查询文本
+
+        Returns:
+            是否成功确认缓存
+        """
+        query_hash = self._hash_query(query)
+
+        with self._pending_lock:
+            pending_data = self._pending_cache.get(query_hash)
+            if not pending_data:
+                logger.warning(f"未找到待定缓存: {query_hash[:8]}...")
+                return False
+
+            # 移到正式缓存
+            success = self.set_cache(
+                query=pending_data["query"],
+                answer=pending_data["answer"],
+                context_ids=pending_data["context_ids"],
+                model_type=pending_data["model_type"],
+                response_time=pending_data["response_time"],
+                context_metadata=pending_data.get("context_metadata", [])
+            )
+
+            if success:
+                # 从待定缓存中移除
+                del self._pending_cache[query_hash]
+                logger.info(f"待定缓存已确认（移到正式缓存）: {query_hash[:8]}...")
+
+            return success
+
+    def discard_pending(self, query: str) -> bool:
+        """
+        丢弃待定缓存（收到 negative 反馈后调用）
+
+        Args:
+            query: 查询文本
+
+        Returns:
+            是否成功丢弃
+        """
+        query_hash = self._hash_query(query)
+
+        with self._pending_lock:
+            if query_hash in self._pending_cache:
+                del self._pending_cache[query_hash]
+                logger.info(f"待定缓存已丢弃: {query_hash[:8]}...")
+                return True
+            return False
+
+    def _cleanup_expired_pending(self):
+        """清理过期的待定缓存"""
+        current_time = time.time()
+        expired_count = 0
+
+        with self._pending_lock:
+            expired_hashes = [
+                hash_key
+                for hash_key, data in self._pending_cache.items()
+                if current_time - data.get("created_at", 0) > self.PENDING_CACHE_TTL
+            ]
+
+            for hash_key in expired_hashes:
+                del self._pending_cache[hash_key]
+                expired_count += 1
+
+        if expired_count > 0:
+            logger.info(f"清理了 {expired_count} 条过期待定缓存")
+
+    def update_feedback(self, query: str, is_positive: bool) -> bool:
         """
         更新用户反馈
+
+        改进：处理待定缓存的确认或丢弃逻辑。
+        - positive 反馈：将待定缓存移到正式缓存
+        - negative 反馈：丢弃待定缓存
 
         Args:
             query: 查询文本
             is_positive: 是否为正面反馈
+
+        Returns:
+            bool: 是否成功处理
         """
+        query_hash = self._hash_query(query)
+
+        # 首先处理待定缓存
+        if is_positive:
+            # 正面反馈：确认缓存（移到正式缓存）
+            pending_confirmed = self.confirm_cache(query)
+            if pending_confirmed:
+                logger.info(f"待定缓存已确认（positive 反馈）: {query_hash[:8]}...")
+        else:
+            # 负面反馈：丢弃待定缓存
+            self.discard_pending(query)
+            logger.info(f"待定缓存已丢弃（negative 反馈）: {query_hash[:8]}...")
+
+        # 然后更新正式缓存的反馈统计（如果存在）
         if self._use_injection:
-            # 依赖注入模式：委托给存储实现
             return self.cache_storage.update_feedback(query, is_positive)
         else:
-            # 兼容模式：使用 PostgreSQL
-            self._update_feedback_postgresql(query, is_positive)
+            return self._update_feedback_postgresql(query, is_positive)
 
-    def _update_feedback_postgresql(self, query: str, is_positive: bool):
+    def _update_feedback_postgresql(self, query: str, is_positive: bool) -> bool:
         """PostgreSQL 模式：更新反馈"""
         query_hash = self._hash_query(query)
         session = self.SessionLocal()
@@ -318,11 +472,14 @@ class CacheManager:
 
                 session.commit()
                 logger.info(f"反馈已更新: {query_hash[:8]}..., 评分: {cache_entry.quality_score:.2f}")
+                return True
             else:
                 logger.warning(f"未找到缓存条目: {query_hash[:8]}...")
+                return False
         except Exception as e:
             logger.error(f"更新反馈失败: {e}")
             session.rollback()
+            raise
         finally:
             session.close()
 
