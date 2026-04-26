@@ -23,14 +23,20 @@
 - 支持 Docker Compose 一键部署，灵活适配不同运行环境。
 
 **知识构建**
-- Zero-Crawler策略：主要使用GitHub API，避免爬虫复杂性
-- 文件驱动管道：Fetch → Clean → [外部文档API增强] → Ingest
+- Zero-Crawler策略：仅使用GitHub API，避免爬虫复杂性
+- 文件驱动管道：Fetch → Clean → [Context7增强] → Ingest
 - Pydantic数据契约：确保数据质量和可追溯性
-- 外部文档API集成（可选）：元数据增强、相关库发现、文档上下文补充
+- 幂等性保证：基于文件路径MD5的唯一ID，支持重复执行
+
+**质量保障**
+- 一致性检查脚本：发版前自动验证索引与管道同步
+- 回归测试框架：确保版本迭代不破坏已有功能
+- 多维质量评估：答案长度、代码块数量、可操作性、完整性评分
 
 **测试评估**
-- 真实场景基准测试：27个场景覆盖部署/API/故障排查
-- 100分质量评估：全面评价答案质量
+- 真实场景基准测试：21个场景覆盖部署/API使用/故障排查
+- 基于回复质量的多维评估：答案长度、代码块数量、可操作性评分
+- 消融实验：验证BM25检索、双层检索等模块的贡献度
 - 回归测试框架：确保版本迭代不破坏已有功能
 
 ## 系统架构
@@ -87,7 +93,7 @@ Agent层 (LangGraph) - 检索与答案生成
 - **知识图谱**：LightRAG
 - **检索增强**：BM25 (rank-bm25) + RRF融合
 - **数据库**：PostgreSQL / Neo4j / JSON文件
-- **模型**：DeepSeek API / Ollama / vLLM
+- **模型**：DeepSeek API / Qwen API（Ollama 本地模型已弃用）
 - **数据采集**：GitHub API（主要）+ 外部文档API（补充）
 - **文档增强**：外部文档API（可选，用于元数据增强和相关库发现）
 - **部署**：Docker Compose
@@ -118,11 +124,14 @@ POSTGRES_PASSWORD=your_password
 POSTGRES_DB=grag_db
 POSTGRES_USER=grag_user
 
-# API配置
-DEEPSEEK_API_KEY=your_api_key
+# API配置（至少配置一个）
+DEEPSEEK_API_KEY=your_deepseek_api_key  # 推荐使用
+QWEN_API_KEY=your_qwen_api_key          # 可选
+
+# API认证
 API_PASSWORD=your_api_password
 
-# 存储模式（可选，默认postgresql）
+# 存储模式（可选，默认json）
 STORAGE_MODE=json  # 可选：postgresql, neo4j, json
 ```
 
@@ -249,17 +258,47 @@ curl -X POST "http://localhost:8000/api/v1/graph/query" \
 运行真实场景基准测试：
 
 ```bash
-# 运行OpenAI部署场景测试
-uv run tests/run_openai_benchmark.py
-
-# 运行完整基准测试套件
+# 运行完整基准测试套件（推荐）
 uv run tests/run_benchmark_tests.py --full
 
+# 运行简化基准测试
+uv run tests/run_simple_benchmark.py
+
 # 运行特定类别测试
-uv run tests/run_benchmark_tests.py --category deployment
+uv run tests/benchmarks/test_deployment.py      # 部署配置场景（15个）
+uv run tests/benchmarks/test_api_usage.py       # API使用场景（3个）
+uv run tests/benchmarks/test_troubleshooting.py # 故障排查场景（3个）
 ```
 
 测试报告将保存到 `artifacts/test_results/benchmarks/`。
+
+### 消融实验
+
+运行模块贡献度分析实验：
+
+```bash
+# 运行基于回复质量的消融实验（推荐）
+uv run tests/evaluation/ablation_quality_study.py
+
+# 运行简化版消融实验
+uv run tests/evaluation/ablation_simple.py
+```
+
+实验报告将保存到 `artifacts/test_results/ablation_quality_report.json` 和 `artifacts/test_results/ablation_response_samples.md`。
+
+### 系统诊断
+
+```bash
+# 一致性检查（发版前必做）
+uv run scripts/check_consistency.py          # 完整检查
+uv run scripts/check_consistency.py --quick # 快速检查
+
+# 系统诊断
+uv run scripts/test_diagnostics.py
+
+# 存储完整性检查
+uv run scripts/test_storage_integrity.py
+```
 
 ## 配置说明
 
@@ -309,6 +348,8 @@ citation:
 
 - **[基准测试指南](tests/BENCHMARKS.md)** - 真实场景测试框架说明
 - **[CLAUDE.md](CLAUDE.md)** - Claude Code 协作开发指南
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** - 开发环境设置与一致性防呆清单
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 完整的模块列表和设计决策
 
 ### 技术文档
 
@@ -350,7 +391,8 @@ citation:
 
 **模型层** (`models/`)
 - `model_manager.py`: 模型管理和切换
-- 支持DeepSeek API和本地模型
+- 支持 DeepSeek API 和 Qwen API
+- 本地模型（Ollama）已弃用
 
 **存储层** (`storage/`)
 - `cache_manager.py`: PostgreSQL缓存
@@ -363,20 +405,37 @@ citation:
 
 ### 测试
 
-基准测试位于 `tests/benchmarks/`：
-
+**基准测试** (`tests/benchmarks/`)
 - `benchmark_base.py`: 基准测试基类
-- `test_deployment.py`: 部署配置场景测试
-- `test_api_usage.py`: API使用场景测试
-- `test_troubleshooting.py`: 故障排查场景测试
+- `test_deployment.py`: 部署配置场景测试（15个场景）
+- `test_api_usage.py`: API使用场景测试（3个场景）
+- `test_troubleshooting.py`: 故障排查场景测试（3个场景）
 - `test_openai_deployment.py`: OpenAI部署场景测试
+
+**评估实验** (`tests/evaluation/`)
+- `ablation_quality_study.py`: 基于回复质量的消融实验
+- `ablation_simple.py`: 简化版消融实验
+- `ablation_study.py`: 完整消融实验框架
+
+**管道测试** (`tests/pipeline/`)
+- `test_fetch.py`: 数据获取测试
+- `test_clean.py`: 数据清洗测试
+- `test_ingest.py`: 数据摄取测试
+- `test_pipeline_e2e.py`: 管道端到端测试
+
+**回归测试** (`tests/`)
+- `test_citation_system.py`: 引用系统测试
+- `test_cache_bypass.py`: 缓存绕过测试
+- `test_bm25_no_cache.py`: BM25无缓存测试
+- `test_retrieval_benchmark.py`: 检索性能基准测试
 
 ## 已知限制
 
-1. 流式响应实现需要完善
-2. LightRAG实体抽取prompt需要根据实际需求调优
-3. 仅支持GitHub仓库作为数据源
-4. 本地模型（Ollama）配置中暂时禁用
+1. 本地模型（Ollama）已弃用，推荐使用 DeepSeek API 或 Qwen API
+2. BM25 检索在当前测试集上贡献有限，但在关键词密集型查询中可能有价值
+3. 仅支持 GitHub 仓库作为数据源
+4. 高并发环境下的性能尚未充分验证
+5. 增量更新机制需要完善（当前为批次式手动触发）
 
 ## 贡献
 
