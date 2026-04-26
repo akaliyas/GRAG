@@ -254,6 +254,22 @@ class CleanBatch(BaseModel):
             raise ValueError(f"Failed to parse CleanBatch from {path}: {e}") from e
 
 
+# ==================== 知识库协议层 ====================
+
+class BM25Document(BaseModel):
+    """BM25 索引器文档协议
+
+    用于 BM25 索引器的文档输入，包含完整的文本内容和元数据。
+    确保类型安全和数据完整性。
+    """
+    doc_id: str = Field(..., description="文档唯一标识符")
+    content: str = Field(..., description="文档纯文本内容（用于分词和检索）")
+    source_url: str = Field(..., description="文档来源 URL")
+    file_path: str = Field(..., description="文件路径（用于溯源）")
+    file_type: str = Field(..., description="文件类型（markdown/notebook等）")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
+
+
 # ==================== API 协议层 ====================
 
 class QueryRequest(BaseModel):
