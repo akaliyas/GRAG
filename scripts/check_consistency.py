@@ -23,7 +23,7 @@ from config.config_manager import get_config
 from utils.logger import setup_logger
 
 # 初始化日志
-logger = setup_logger(__name__)
+logger = setup_logger()
 
 class ConsistencyChecker:
     """一致性检查器"""

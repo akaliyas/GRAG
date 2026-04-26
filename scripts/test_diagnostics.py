@@ -211,23 +211,37 @@ def check_model_config():
         from config.config_manager import get_config
         
         config = get_config()
-        api_config = config.get_model_config("api")
+        model_switch = config.get("model_switch", {})
+        priority = model_switch.get("priority", "qwen")
+
+        # 兼容当前配置结构（models.ds / models.qwen / models.local）
+        ds_config = config.get_model_config("ds")
+        qwen_config = config.get_model_config("qwen")
         local_config = config.get_model_config("local")
-        
-        print("API 模型配置:")
-        print(f"  - API Key 已设置: {'是' if api_config.get('api_key') else '否'}")
-        print(f"  - Base URL: {api_config.get('base_url', '未设置')}")
-        print(f"  - Model Name: {api_config.get('model_name', '未设置')}")
-        print(f"  - Temperature: {api_config.get('temperature', '未设置')}")
-        print(f"  - Max Tokens: {api_config.get('max_tokens', '未设置')}")
+        selected_key = "ds" if priority == "ds" else "qwen"
+        selected_config = ds_config if selected_key == "ds" else qwen_config
+
+        print("在线模型配置:")
+        print(f"  - 当前优先模型: {selected_key}")
+        print(f"  - API Key 已设置: {'是' if selected_config.get('api_key') else '否'}")
+        print(f"  - Base URL: {selected_config.get('base_url', '未设置')}")
+        print(f"  - Model Name: {selected_config.get('model_name', '未设置')}")
+        print(f"  - Temperature: {selected_config.get('temperature', '未设置')}")
+        print(f"  - Max Tokens: {selected_config.get('max_tokens', '未设置')}")
+
+        print("\n备用在线模型配置:")
+        backup_key = "qwen" if selected_key == "ds" else "ds"
+        backup_config = qwen_config if backup_key == "qwen" else ds_config
+        print(f"  - 备用模型: {backup_key}")
+        print(f"  - API Key 已设置: {'是' if backup_config.get('api_key') else '否'}")
+        print(f"  - Model Name: {backup_config.get('model_name', '未设置')}")
         
         print("\n本地模型配置（暂时禁用）:")
         print(f"  - Base URL: {local_config.get('base_url', '未设置')}")
         print(f"  - Model Name: {local_config.get('model_name', '未设置')}")
         
         print("\n模型切换策略:")
-        model_switch = config.get("model_switch", {})
-        print(f"  - Priority: {model_switch.get('priority', '未设置')}")
+        print(f"  - Priority: {priority}")
         print(f"  - Fallback to API: {model_switch.get('fallback_to_api', False)}")
         
         # 检查 LightRAG 配置

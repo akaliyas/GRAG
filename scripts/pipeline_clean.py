@@ -17,6 +17,10 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+# 加载环境变量（从 .env 文件）
+load_dotenv()
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
