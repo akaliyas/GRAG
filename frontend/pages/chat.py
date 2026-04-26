@@ -7,6 +7,7 @@ import streamlit as st
 import requests
 import json
 import base64
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -25,6 +26,51 @@ logger = logging.getLogger(__name__)
 # Initialize session manager (文件系统存储，持久化)
 session_manager = FileSessionManager()
 logger.info("文件会话管理器已初始化")
+
+
+def _build_citation_display_lines(citations: List, context_metadata: List[Dict]) -> List[str]:
+    """将引用编号与 context_metadata 对齐为可读来源。"""
+    if not isinstance(context_metadata, list) or not context_metadata:
+        return [str(c) for c in citations if c is not None]
+
+    indexed_meta: Dict[int, Dict] = {}
+    for pos, meta in enumerate(context_metadata, start=1):
+        if not isinstance(meta, dict):
+            continue
+        idx = meta.get("index", pos)
+        try:
+            indexed_meta[int(idx)] = meta
+        except Exception:
+            continue
+
+    citation_indices: List[int] = []
+    if isinstance(citations, list):
+        for citation in citations:
+            if isinstance(citation, str):
+                match = re.search(r"\[(\d+)\]", citation)
+                if match:
+                    citation_indices.append(int(match.group(1)))
+            elif isinstance(citation, dict):
+                idx = citation.get("index")
+                if isinstance(idx, int):
+                    citation_indices.append(idx)
+
+    if not citation_indices:
+        citation_indices = list(indexed_meta.keys())
+
+    lines: List[str] = []
+    for idx in sorted(set(citation_indices)):
+        meta = indexed_meta.get(idx)
+        if not meta:
+            lines.append(f"[{idx}] 未找到来源元数据")
+            continue
+        source = meta.get("source", {})
+        file_path = source.get("file_path", "未知来源") if isinstance(source, dict) else "未知来源"
+        retrieval_info = meta.get("retrieval_info", {})
+        method = retrieval_info.get("method", "") if isinstance(retrieval_info, dict) else ""
+        lines.append(f"[{idx}] {file_path}" + (f" ({method})" if method else ""))
+
+    return lines
 
 
 def init_session_state():
@@ -700,21 +746,15 @@ def show():
                             if "citations" in message:
                                 citations = message.get("citations", [])
                                 if citations and isinstance(citations, list):
-                                    st.write(f"**引用**: {len(citations)} 个")
-                                    for citation in citations:
+                                    context_metadata = message.get("context_metadata", [])
+                                    citation_lines = _build_citation_display_lines(
+                                        citations,
+                                        context_metadata if isinstance(context_metadata, list) else []
+                                    )
+                                    st.write(f"**引用**: {len(citation_lines)} 个")
+                                    for citation in citation_lines:
                                         try:
-                                            if isinstance(citation, str):
-                                                st.caption(citation)
-                                            elif isinstance(citation, dict):
-                                                # 兼容字典格式
-                                                source = citation.get('source', {})
-                                                if isinstance(source, dict):
-                                                    file_path = source.get('file_path', '未知来源')
-                                                else:
-                                                    file_path = '未知来源'
-                                                st.caption(f"• {file_path}")
-                                            else:
-                                                st.caption(f"• {str(citation)}")
+                                            st.caption(citation)
                                         except Exception as e:
                                             logger.error(f"显示引用失败: {e}")
                                             st.caption("• [引用格式错误]")
@@ -808,6 +848,7 @@ def show():
                                     "model_type": str(chunk.get("model_type", "unknown")),
                                     "from_cache": bool(chunk.get("from_cache", False)),
                                     "context_ids": list(chunk.get("context_ids", [])),
+                                    "context_metadata": list(chunk.get("context_metadata", [])),
                                     "intent": str(chunk.get("intent", "")),
                                     "citations": list(chunk.get("citations", [])),
                                     "citation_info": dict(chunk.get("citation_info", {}))
